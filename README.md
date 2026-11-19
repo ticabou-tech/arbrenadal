@@ -12,9 +12,11 @@ que iluminan su entorno y **nieve en 3D** que no atraviesa paredes ni techos.
 | Paredes   | Guirnalda de pino en festones con luces, lazos y sombra sobre la pared; nieve acumulada en tejados y muros (exterior) |
 | Todo      | Nieve en 3 capas de profundidad (lejos, media y bokeh cercano). En interior solo nieva tras las ventanas |
 
-Las **fotos** se guardan directamente en una carpeta que eliges una vez (Chrome / Edge
-de escritorio, botón 📁; la app pide permiso de acceso), en Fotos mediante "Guardar
-imagen" en iPhone, o como descarga en Android y otros navegadores.
+Las **fotos** se guardan siempre en la **galería de la app** (botón 🖼️, desde donde se
+pueden volver a guardar o borrar) y además en el dispositivo: en una carpeta que eliges
+una vez (Chrome / Edge de escritorio, botón 📁; la app pide permiso de acceso), con
+"Guardar imagen" / "Guardar en Archivos" en iPhone, o en Descargas en Android y otros
+navegadores.
 
 Además permite **cambiar de cámara**, **pausar**, **modo noche**,
 **luces cálidas**, elegir **detección rápida o precisa** y ver las **máscaras** detectadas.
@@ -60,7 +62,7 @@ js/worker.js        IA de segmentación (Web Worker)
 js/tracker.js       Seguimiento del movimiento de la cámara
 js/scene.js         Fusión de análisis y geometría: ventanas, árboles, borde de paredes
 js/decor.js         Dibujo de la decoración (ventanas, árboles, paredes)
-js/photos.js        Guardado de fotos (carpeta con permiso, Fotos en iPhone o descarga)
+js/photos.js        Guardado de fotos (galería interna + carpeta con permiso, Guardar como, Fotos/Archivos en iPhone o descarga)
 js/snow.js          Nieve en 3 capas con oclusión y colisiones
 js/sprites.js       Sprites pre-renderizados (bombillas, bolas, estrella, guirnalda…)
 js/geom.js          Utilidades geométricas
