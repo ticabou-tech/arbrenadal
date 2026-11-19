@@ -1,12 +1,13 @@
 // Navidad AR — bucle principal: cámara, seguimiento de movimiento, análisis con IA
 // (en un Web Worker) y dibujo de la decoración y la nieve.
-import { CONFIG, MODELS } from "./config.js";
+import { CONFIG, MODELS, SIZES, START_SIZE, TARGET_MS } from "./config.js";
 import { I, compose, scaleOf } from "./geom.js";
 import { Tracker } from "./tracker.js";
 import { Scene } from "./scene.js";
 import { Snow } from "./snow.js";
 import { drawWindows, drawTrees, drawWall, updateSwing } from "./decor.js";
 import { mkCanvas } from "./sprites.js";
+import { savePhoto, chooseFolder, folderSupported, folderName } from "./photos.js";
 
 const $ = id => document.getElementById(id);
 const video = $("video"), out = $("out"), ctx = out.getContext("2d");
@@ -26,7 +27,8 @@ let vel = 0, accel = 0;             // velocidad/aceleración horizontal de la c
 
 let W = 0, H = 0, G = I();          // G: mundo → pantalla (píxeles de vídeo)
 let stream = null, facing = "environment";
-let worker = null, workerReady = false, busy = false, pendingG = null, inferMs = 0, backend = "", modelName = "";
+let worker = null, workerReady = false, busy = false, pendingG = null, pendingGray = null, inferMs = 0, backend = "", modelName = "", dtype = "";
+let sizeIdx = SIZES.indexOf(START_SIZE.fast), flip = false, sizeCooldown = 0;
 let running = false, paused = false, lastT = 0, epoch = 0;
 
 // ---------------------------------------------------------------------------
@@ -47,7 +49,6 @@ async function openCamera() {
 function resize() {
   W = out.width = decorCv.width = emitCv.width = video.videoWidth; H = out.height = decorCv.height = emitCv.height = video.videoHeight;
   shadowCv.width = Math.round(W * SHADOW_K); shadowCv.height = Math.round(H * SHADOW_K);
-  cap.width = CONFIG.analysisWidth; cap.height = Math.round(CONFIG.analysisWidth * H / W);
   G = I(); epoch++;                 // descarta análisis en curso de la vista anterior
   tracker.reset(); scene.reset(W, H); snow.resize(W, H);
 }
@@ -90,13 +91,17 @@ function startWorker(quality) {
         bar.style.width = (100 * l / tt).toFixed(1) + "%";
         setStatus(`Descargando modelo… ${Math.round(100 * l / tt)} % (solo la primera vez)`);
       } else if (data.type === "ready") {
-        workerReady = true; backend = data.backend; modelName = data.model.includes("b2") ? "preciso" : "rápido";
+        workerReady = true; backend = data.backend; dtype = data.dtype; inferMs = 0;
+        modelName = data.model.includes("b2") ? "preciso" : "rápido";
+        sizeIdx = SIZES.indexOf(START_SIZE[data.model.includes("b2") ? "precise" : "fast"]);
+        if (quality === "precise" && !data.model.includes("b2")) setTimeout(() => toast("El modelo preciso no está disponible en este dispositivo: se usa el rápido"), 500);
         progress.hidden = true; resolve();
       } else if (data.type === "result") {
         busy = false;
         if (data.epoch !== epoch) return;
         inferMs = inferMs ? inferMs * 0.8 + data.ms * 0.2 : data.ms;
-        scene.ingest(data, pendingG);
+        adaptSize(data.ms);
+        scene.ingest(data, pendingG, pendingGray);
       } else if (data.type === "error") {
         busy = false;
         if (data.during === "load") { progress.hidden = true; reject(new Error(data.message)); }
@@ -109,15 +114,31 @@ function startWorker(quality) {
   });
 }
 
+// Resolución adaptativa: sube o baja el tamaño de entrada para mantener ~TARGET_MS por
+// análisis. Con el seguimiento de movimiento, la animación va fluida aunque el modelo
+// sea lento; esto mantiene además la detección al día.
+function adaptSize(ms) {
+  if (--sizeCooldown > 0) return;
+  if (ms > TARGET_MS * 1.35 && sizeIdx > 0) { sizeIdx--; sizeCooldown = 6; }
+  else if (inferMs < TARGET_MS * 0.6 && sizeIdx < SIZES.length - 1) { sizeIdx++; sizeCooldown = 10; }
+}
+
 function requestInference() {
   if (!workerReady || busy || paused || document.hidden || video.readyState < 2) return;
   busy = true;
-  cctx.drawImage(video, 0, 0, cap.width, cap.height);
-  const img = cctx.getImageData(0, 0, cap.width, cap.height);
+  const w = SIZES[sizeIdx], h = Math.max(128, Math.round(w * H / W / 32) * 32);
+  if (cap.width !== w || cap.height !== h) { cap.width = w; cap.height = h; }
+  cctx.drawImage(video, 0, 0, w, h);
+  const img = cctx.getImageData(0, 0, w, h);
   pendingG = { ...G };              // posición de la cámara en el momento de la captura
+  // Copia en grises para ajustar los bordes de ventanas y paredes a las líneas de la imagen.
+  const gray = new Uint8Array(w * h), d = img.data;
+  for (let i = 0, j = 0; i < gray.length; i++, j += 4) gray[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
+  pendingGray = { w, h, data: gray };
   estimateLight(img);
+  flip = !flip;                     // alterna imagen normal / espejo: se fusionan en el tiempo
   const e = epoch;
-  worker.postMessage({ type: "infer", id: e, epoch: e, width: img.width, height: img.height, buffer: img.data.buffer }, [img.data.buffer]);
+  worker.postMessage({ type: "infer", id: e, epoch: e, width: w, height: h, flip, buffer: img.data.buffer }, [img.data.buffer]);
 }
 
 function estimateLight({ data, width: w, height: h }) {
@@ -219,7 +240,7 @@ function updateStatus(t) {
   if (scene.garland.size) found.push("pared");
   const where = scene.indoor > 0.5 ? "interior" : "exterior";
   const track = tracker.quality > 0.25 ? "seguimiento OK" : "poca textura para seguir";
-  setStatus(`${backend} (${modelName}) · ${Math.round(inferMs)} ms · ${where} · ${track} · ${found.length ? found.join(", ") : "apunta a una ventana, un árbol o una pared"}`);
+  setStatus(`${backend} ${dtype} (${modelName}, ${SIZES[sizeIdx]} px) · ${Math.round(inferMs)} ms · ${where} · ${track} · ${found.length ? found.join(", ") : "apunta a una ventana, un árbol o una pared"}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -273,15 +294,22 @@ $("photo").onclick = () => {
   const flash = document.createElement("div"); flash.className = "flash";
   document.body.append(flash); setTimeout(() => flash.remove(), 400);
   snap.toBlob(async blob => {
-    const name = `navidad-ar-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
-    const file = new File([blob], name, { type: "image/png" });
-    if (navigator.canShare?.({ files: [file] })) {
-      try { await navigator.share({ files: [file], title: "Navidad AR" }); return; }
-      catch (e) { if (e.name === "AbortError") return; }
-    }
-    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
-    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }, "image/png");
+    try { toast(await savePhoto(blob)); }
+    catch (e) { console.error(e); toast("No se pudo guardar la foto: " + e.message); }
+  }, "image/jpeg", 0.92);
 };
+
+$("folder").onclick = async () => {
+  try { const name = await chooseFolder(); if (name) toast(`Las fotos se guardarán en «${name}»`); }
+  catch (e) { if (e.name !== "AbortError") toast("No se pudo usar la carpeta: " + e.message); }
+};
+if (!folderSupported) $("folder").hidden = true;
+else folderName().then(n => { if (n) $("folder").title = `Carpeta de fotos: ${n}`; });
+
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast.timer); toast.timer = setTimeout(() => { t.hidden = true; }, 3500);
+}
 
 document.addEventListener("visibilitychange", () => { if (!document.hidden) tracker.reset(); });
