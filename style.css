@@ -1,0 +1,47 @@
+:root { --bg: #0c1a14; --red: #c62828; --panel: rgba(12, 26, 20, .7); }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%; background: var(--bg); color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+video, canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+#ui {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 2;
+  display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center;
+  padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  background: var(--panel); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  font-size: 14px;
+}
+#toggles { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px 4px 6px;
+  border-radius: 999px; background: rgba(255, 255, 255, .1); cursor: pointer; user-select: none;
+  border-left: 4px solid transparent;
+}
+.chip.window { border-left-color: rgb(80, 160, 255); }
+.chip.tree   { border-left-color: rgb(60, 200, 90); }
+.chip.wall   { border-left-color: rgb(255, 160, 60); }
+#status { flex: 1 1 100%; margin: 0; opacity: .9; }
+#progress { flex: 1 1 100%; height: 4px; background: rgba(255, 255, 255, .15); border-radius: 2px; overflow: hidden; }
+#bar { height: 100%; width: 0; background: #ffd54a; transition: width .2s; }
+
+button {
+  font: inherit; font-size: 16px; padding: 8px 16px; border: 0; border-radius: 8px;
+  background: rgba(255, 255, 255, .15); color: #fff; cursor: pointer;
+}
+button.primary { background: var(--red); }
+button:disabled { opacity: .5; cursor: default; }
+
+#actions {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
+  display: flex; justify-content: center; align-items: center; gap: 28px;
+  padding: 12px 12px max(16px, env(safe-area-inset-bottom));
+}
+#actions button { width: 52px; height: 52px; padding: 0; border-radius: 50%; font-size: 22px; background: var(--panel); }
+#actions button.round { width: 68px; height: 68px; font-size: 28px; background: var(--red); box-shadow: 0 0 0 4px rgba(255,255,255,.6); }
+[hidden] { display: none !important; }
+
+.flash { position: absolute; inset: 0; z-index: 3; background: #fff; animation: flash .35s ease-out forwards; pointer-events: none; }
+@keyframes flash { from { opacity: .8; } to { opacity: 0; } }
