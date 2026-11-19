@@ -39,7 +39,13 @@
   <button id="photo" class="primary round" title="Hacer foto" aria-label="Hacer foto">📸</button>
   <button id="pause" title="Pausar" aria-label="Pausar">⏸️</button>
   <button id="folder" title="Elegir carpeta para guardar las fotos" aria-label="Elegir carpeta de fotos">📁</button>
+  <button id="gallery" title="Fotos guardadas" aria-label="Fotos guardadas">🖼️</button>
 </footer>
+<section id="gallery-view" hidden aria-label="Fotos guardadas">
+  <header><h2>Fotos guardadas</h2><button id="gallery-close" aria-label="Cerrar">✕</button></header>
+  <p id="gallery-empty">Todavía no hay fotos. Pulsa 📸 para hacer una.</p>
+  <div id="gallery-grid"></div>
+</section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
 <script type="module" src="js/main.js"></script>

@@ -7,7 +7,7 @@ import { Scene } from "./scene.js";
 import { Snow } from "./snow.js";
 import { drawWindows, drawTrees, drawWall, updateSwing } from "./decor.js";
 import { mkCanvas } from "./sprites.js";
-import { savePhoto, chooseFolder, folderSupported, folderName } from "./photos.js";
+import { savePhoto, chooseFolder, folderSupported, folderName, listPhotos, deletePhoto, exportPhoto } from "./photos.js";
 
 const $ = id => document.getElementById(id);
 const video = $("video"), out = $("out"), ctx = out.getContext("2d");
@@ -338,18 +338,49 @@ $("pause").onclick = () => {
   $("pause").textContent = paused ? "▶️" : "⏸️";
 };
 
-$("photo").onclick = () => {
+// La imagen se codifica de forma síncrona para que el guardado empiece dentro del
+// mismo toque del usuario (los navegadores solo dejan pedir permisos durante el toque).
+function dataURLToBlob(url) {
+  const [head, b64] = url.split(","), bin = atob(b64), arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: head.match(/:(.*?);/)[1] });
+}
+
+$("photo").onclick = async () => {
   const snap = mkCanvas(W, H), s = snap.getContext("2d");
   if (facing === "user") { s.translate(W, 0); s.scale(-1, 1); }
   s.drawImage(video, 0, 0, W, H);
   s.drawImage(out, 0, 0);
+  const blob = dataURLToBlob(snap.toDataURL("image/jpeg", 0.92));
   const flash = document.createElement("div"); flash.className = "flash";
   document.body.append(flash); setTimeout(() => flash.remove(), 400);
-  snap.toBlob(async blob => {
-    try { toast(await savePhoto(blob)); }
-    catch (e) { console.error(e); toast("No se pudo guardar la foto: " + e.message); }
-  }, "image/jpeg", 0.92);
+  try { toast(await savePhoto(blob)); }
+  catch (e) { console.error(e); toast("No se pudo guardar la foto: " + e.message); }
 };
+
+// Galería de fotos guardadas en la app.
+$("gallery").onclick = () => openGallery();
+$("gallery-close").onclick = () => { $("gallery-view").hidden = true; };
+let galleryUrls = [];
+async function openGallery() {
+  const grid = $("gallery-grid");
+  galleryUrls.forEach(u => URL.revokeObjectURL(u)); galleryUrls = [];
+  grid.replaceChildren();
+  const photos = await listPhotos();
+  $("gallery-empty").hidden = photos.length > 0;
+  for (const { name, file } of photos) {
+    const url = URL.createObjectURL(file); galleryUrls.push(url);
+    const fig = document.createElement("figure");
+    const img = Object.assign(document.createElement("img"), { src: url, alt: name, loading: "lazy" });
+    const save = Object.assign(document.createElement("button"), { textContent: "💾 Guardar", title: "Guardar en el dispositivo" });
+    const del = Object.assign(document.createElement("button"), { textContent: "🗑️", title: "Borrar de la galería" });
+    save.onclick = async () => { try { const w = await exportPhoto(file, name); if (w) toast(`Foto guardada ${w}`); } catch (e) { toast("No se pudo guardar: " + e.message); } };
+    del.onclick = async () => { await deletePhoto(name); fig.remove(); if (!grid.children.length) $("gallery-empty").hidden = false; };
+    const bar = document.createElement("div"); bar.append(save, del);
+    fig.append(img, bar); grid.append(fig);
+  }
+  $("gallery-view").hidden = false;
+}
 
 $("folder").onclick = async () => {
   try { const name = await chooseFolder(); if (name) toast(`Las fotos se guardarán en «${name}»`); }
