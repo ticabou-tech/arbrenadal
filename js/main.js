@@ -1,0 +1,287 @@
+// Navidad AR — bucle principal: cámara, seguimiento de movimiento, análisis con IA
+// (en un Web Worker) y dibujo de la decoración y la nieve.
+import { CONFIG, MODELS } from "./config.js";
+import { I, compose, scaleOf } from "./geom.js";
+import { Tracker } from "./tracker.js";
+import { Scene } from "./scene.js";
+import { Snow } from "./snow.js";
+import { drawWindows, drawTrees, drawWall, updateSwing } from "./decor.js";
+import { mkCanvas } from "./sprites.js";
+
+const $ = id => document.getElementById(id);
+const video = $("video"), out = $("out"), ctx = out.getContext("2d");
+const opt = id => $(id).checked;
+const setStatus = txt => { $("status").textContent = txt; };
+
+const tracker = new Tracker(CONFIG.trackWidth);
+const scene = new Scene();
+const snow = new Snow();
+const cap = mkCanvas(), cctx = cap.getContext("2d", { willReadFrequently: true });
+const decorCv = mkCanvas(), shadowCv = mkCanvas(), emitCv = mkCanvas();
+const SHADOW_K = 0.25;              // las sombras se dibujan a 1/4 de resolución: así salen difuminadas
+
+// Luz de la escena estimada a partir de la imagen: brillo, tono y de qué lado viene.
+const light = { lum: 0.6, tint: [1, 1, 1], dir: [0, -1] };
+let vel = 0, accel = 0;             // velocidad/aceleración horizontal de la cámara (px/s)
+
+let W = 0, H = 0, G = I();          // G: mundo → pantalla (píxeles de vídeo)
+let stream = null, facing = "environment";
+let worker = null, workerReady = false, busy = false, pendingG = null, inferMs = 0, backend = "", modelName = "";
+let running = false, paused = false, lastT = 0, epoch = 0;
+
+// ---------------------------------------------------------------------------
+// Cámara
+// ---------------------------------------------------------------------------
+async function openCamera() {
+  stream?.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: { ideal: facing }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false,
+  });
+  video.srcObject = stream;
+  await video.play();
+  const mirror = facing === "user" ? "scaleX(-1)" : "";
+  video.style.transform = out.style.transform = mirror;
+  resize();
+}
+
+function resize() {
+  W = out.width = decorCv.width = emitCv.width = video.videoWidth; H = out.height = decorCv.height = emitCv.height = video.videoHeight;
+  shadowCv.width = Math.round(W * SHADOW_K); shadowCv.height = Math.round(H * SHADOW_K);
+  cap.width = CONFIG.analysisWidth; cap.height = Math.round(CONFIG.analysisWidth * H / W);
+  G = I(); epoch++;                 // descarta análisis en curso de la vista anterior
+  tracker.reset(); scene.reset(W, H); snow.resize(W, H);
+}
+
+// Seguimiento: una vez por fotograma de la cámara.
+function onVideoFrame() {
+  if (running && !paused && W) {
+    if (video.videoWidth !== W || video.videoHeight !== H) resize();
+    const M = tracker.update(video, W, H);
+    G = compose(M, G);
+    snow.onMotion(M);
+    const now = performance.now(), fdt = Math.max(0.01, (now - (onVideoFrame.t || now - 33)) / 1000); onVideoFrame.t = now;
+    const v = -M.tx / fdt;          // el mundo se mueve al revés que la cámara
+    accel = accel * 0.5 + ((v - vel) / fdt) * 0.5; vel = v;
+    // Si el zoom acumulado se dispara (se ha caminado mucho), se reinicia el mundo.
+    const s = scaleOf(G);
+    if (s > 4 || s < 0.25) resize();
+  }
+  if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onVideoFrame);
+}
+let lastVideoTime = -1;
+function pollVideoFrame() {          // alternativa si no existe requestVideoFrameCallback
+  if (video.currentTime !== lastVideoTime) { lastVideoTime = video.currentTime; onVideoFrame(); }
+}
+
+// ---------------------------------------------------------------------------
+// Modelo (Web Worker)
+// ---------------------------------------------------------------------------
+function startWorker(quality) {
+  worker?.terminate();
+  workerReady = false; busy = false;
+  worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  const files = {}, bar = $("bar"), progress = $("progress");
+  progress.hidden = false; bar.style.width = "0";
+  return new Promise((resolve, reject) => {
+    worker.onmessage = ({ data }) => {
+      if (data.type === "progress" && data.total) {
+        files[data.file] = [data.loaded, data.total];
+        const [l, tt] = Object.values(files).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
+        bar.style.width = (100 * l / tt).toFixed(1) + "%";
+        setStatus(`Descargando modelo… ${Math.round(100 * l / tt)} % (solo la primera vez)`);
+      } else if (data.type === "ready") {
+        workerReady = true; backend = data.backend; modelName = data.model.includes("b2") ? "preciso" : "rápido";
+        progress.hidden = true; resolve();
+      } else if (data.type === "result") {
+        busy = false;
+        if (data.epoch !== epoch) return;
+        inferMs = inferMs ? inferMs * 0.8 + data.ms * 0.2 : data.ms;
+        scene.ingest(data, pendingG);
+      } else if (data.type === "error") {
+        busy = false;
+        if (data.during === "load") { progress.hidden = true; reject(new Error(data.message)); }
+        else { console.error(data.message); setStatus("Error al analizar: " + data.message); }
+      }
+    };
+    worker.onerror = e => { progress.hidden = true; reject(new Error(e.message || "no se pudo iniciar el worker")); };
+    const models = quality === "precise" ? [MODELS.precise, MODELS.fast] : [MODELS.fast];
+    worker.postMessage({ type: "load", models });
+  });
+}
+
+function requestInference() {
+  if (!workerReady || busy || paused || document.hidden || video.readyState < 2) return;
+  busy = true;
+  cctx.drawImage(video, 0, 0, cap.width, cap.height);
+  const img = cctx.getImageData(0, 0, cap.width, cap.height);
+  pendingG = { ...G };              // posición de la cámara en el momento de la captura
+  estimateLight(img);
+  const e = epoch;
+  worker.postMessage({ type: "infer", id: e, epoch: e, width: img.width, height: img.height, buffer: img.data.buffer }, [img.data.buffer]);
+}
+
+function estimateLight({ data, width: w, height: h }) {
+  let r = 0, g = 0, b = 0, L = 0, Rr = 0, T = 0, Bt = 0, n = 0;
+  for (let y = 0; y < h; y += 4) for (let x = 0; x < w; x += 4) {
+    const i = (y * w + x) * 4, l = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+    if (x < w / 2) L += l; else Rr += l;
+    if (y < h / 2) T += l; else Bt += l;
+  }
+  const lum = (r * 0.299 + g * 0.587 + b * 0.114) / n / 255, m = (r + g + b) / 3 || 1;
+  const k = 0.15;
+  light.lum += (lum - light.lum) * k;
+  light.tint = light.tint.map((v, i) => v + ([r, g, b][i] / m - v) * k);
+  // La luz viene del lado más brillante (con preferencia por "desde arriba").
+  const dx = (Rr - L) / (Rr + L + 1), dy = (Bt - T) / (Bt + T + 1) - 0.25, d = Math.hypot(dx, dy) || 1;
+  light.dir = [light.dir[0] + (dx / d - light.dir[0]) * k, light.dir[1] + (dy / d - light.dir[1]) * k];
+}
+
+// Ajusta la exposición y el tono de los adornos "materiales" a la luz de la escena.
+function grade(c) {
+  const night = opt("fx-night");
+  const amb = Math.min(1, Math.max(0.3, (light.lum - 0.05) * 1.7)) * (night ? 0.6 : 1);
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.globalCompositeOperation = "source-atop";
+  c.fillStyle = `rgba(0,0,0,${(1 - amb).toFixed(3)})`; c.fillRect(0, 0, W, H);
+  const [tr, tg, tb] = light.tint.map(v => Math.round(Math.min(255, 200 * v)));
+  c.fillStyle = `rgba(${tr},${tg},${tb},0.10)`; c.fillRect(0, 0, W, H);
+  c.globalCompositeOperation = "source-over";
+}
+
+// ---------------------------------------------------------------------------
+// Dibujo
+// ---------------------------------------------------------------------------
+function frame(t) {
+  if (!running) return;
+  requestAnimationFrame(frame);
+  if (!video.requestVideoFrameCallback) pollVideoFrame();
+  requestInference();
+  const dt = Math.min(0.1, (t - lastT) / 1000 || 0); lastT = t;
+  if (paused) return;
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
+  ctx.clearRect(0, 0, W, H);
+
+  const indoor = scene.indoor > 0.5, outdoor = scene.ready && !indoor;
+  const opts = { warm: opt("fx-warm"), outdoor, windowLights: true };
+
+  if (opt("fx-night")) { ctx.fillStyle = "rgba(4,10,28,.45)"; ctx.fillRect(0, 0, W, H); }
+
+  if (opt("fx-snow")) { snow.update(dt, t, scene, G, outdoor); snow.drawFar(ctx, scene, G, indoor); }
+  if (scene.ready) {
+    // Capas: adornos (d), sombras (s) y luz emitida (e).
+    const d = decorCv.getContext("2d"), sh = shadowCv.getContext("2d"), e = emitCv.getContext("2d");
+    d.setTransform(1, 0, 0, 1, 0, 0); d.clearRect(0, 0, W, H);
+    e.setTransform(1, 0, 0, 1, 0, 0); e.globalAlpha = 1; e.globalCompositeOperation = "source-over"; e.clearRect(0, 0, W, H);
+    e.globalCompositeOperation = "lighter";                // la luz se suma
+    sh.setTransform(1, 0, 0, 1, 0, 0); sh.globalCompositeOperation = "source-over"; sh.clearRect(0, 0, shadowCv.width, shadowCv.height);
+    sh.setTransform(SHADOW_K, 0, 0, SHADOW_K, 0, 0); sh.fillStyle = sh.strokeStyle = "#000";
+    const u = Math.min(W, H) / 100, dark = Math.min(1, Math.max(0, (0.45 - light.lum) * 2.5) + (opt("fx-night") ? 0.6 : 0));
+    const R = { d, s: sh, e, sh: [-light.dir[0] * u * 1.6, -light.dir[1] * u * 1.6 + u * 0.6], lightDir: light.dir, dark };
+    updateSwing(dt, accel);
+    if (opt("fx-wall")) drawWall(R, scene, G, t, opts);
+    if (opt("fx-window")) drawWindows(R, scene, G, t, opts);
+    if (opt("fx-tree")) drawTrees(R, scene, G, t, dt, opts);
+    // Componer: sombras (difuminadas) → adornos con la luz de la escena → luz emitida encima.
+    sh.setTransform(1, 0, 0, 1, 0, 0); sh.globalCompositeOperation = "source-in"; sh.globalAlpha = 1;
+    sh.fillStyle = "rgb(10,14,30)"; sh.fillRect(0, 0, shadowCv.width, shadowCv.height);
+    grade(d);
+    ctx.globalAlpha = 0.42 + 0.25 * (1 - light.lum); ctx.drawImage(shadowCv, 0, 0, W, H); ctx.globalAlpha = 1;
+    ctx.drawImage(decorCv, 0, 0);
+    ctx.globalCompositeOperation = "lighter"; ctx.drawImage(emitCv, 0, 0); ctx.globalCompositeOperation = "source-over";
+  }
+  if (opt("fx-snow")) snow.drawNear(ctx, scene, G, indoor);
+
+  if (opt("fx-debug") && scene.ready) {
+    ctx.save(); ctx.globalAlpha = 0.45; ctx.setTransform(...scene.gridMatrix(G));
+    for (const n of ["sky", "solid", "tree", "window"]) ctx.drawImage(scene.cv[n], 0, 0);
+    ctx.restore();
+    ctx.strokeStyle = "#4fc3f7"; ctx.lineWidth = 3;
+    for (const w of scene.windows) {
+      ctx.beginPath();
+      w.pts.forEach(([x, y], i) => { const px = G.a * x - G.b * y + G.tx, py = G.b * x + G.a * y + G.ty; i ? ctx.lineTo(px, py) : ctx.moveTo(px, py); });
+      ctx.closePath(); ctx.stroke();
+    }
+  }
+  updateStatus(t);
+}
+
+let lastStatus = 0;
+function updateStatus(t) {
+  if (t - lastStatus < 500) return;
+  lastStatus = t;
+  if (!scene.ready) { setStatus(`${backend} · analizando…`); return; }
+  const c = scene.coverage, found = [];
+  if (scene.windows.some(w => !w.miss)) found.push("ventana"); else if (c.window > 0.01) found.push("ventana (?)");
+  if (scene.trees.some(tr => !tr.miss)) found.push("árbol");
+  if (scene.garland.size) found.push("pared");
+  const where = scene.indoor > 0.5 ? "interior" : "exterior";
+  const track = tracker.quality > 0.25 ? "seguimiento OK" : "poca textura para seguir";
+  setStatus(`${backend} (${modelName}) · ${Math.round(inferMs)} ms · ${where} · ${track} · ${found.length ? found.join(", ") : "apunta a una ventana, un árbol o una pared"}`);
+}
+
+// ---------------------------------------------------------------------------
+// Botones
+// ---------------------------------------------------------------------------
+$("start").onclick = async () => {
+  const btn = $("start");
+  btn.disabled = true;
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error("este navegador no permite usar la cámara aquí (hace falta https o localhost)");
+    setStatus("Abriendo cámara…");
+    await openCamera();
+    setStatus("Cargando modelo…");
+    await startWorker($("quality").value);
+    btn.hidden = true;
+    $("actions").hidden = false;
+    running = true;
+    if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onVideoFrame);
+    requestAnimationFrame(frame);
+  } catch (e) {
+    console.error(e);
+    const msg = e.name === "NotAllowedError" ? "Permiso de cámara denegado." :
+                e.name === "NotFoundError" ? "No se ha encontrado ninguna cámara." : e.message;
+    setStatus("Error: " + msg);
+    btn.disabled = false;
+  }
+};
+
+$("quality").onchange = async () => {
+  if (!running) return;
+  setStatus("Cambiando de modelo…");
+  try { await startWorker($("quality").value); } catch (e) { setStatus("Error: " + e.message); }
+};
+
+$("flip").onclick = async () => {
+  facing = facing === "environment" ? "user" : "environment";
+  try { await openCamera(); } catch (e) { setStatus("No se pudo cambiar de cámara: " + e.message); }
+};
+
+$("pause").onclick = () => {
+  paused = !paused;
+  if (paused) video.pause(); else { video.play(); tracker.reset(); }
+  $("pause").textContent = paused ? "▶️" : "⏸️";
+};
+
+$("photo").onclick = () => {
+  const snap = mkCanvas(W, H), s = snap.getContext("2d");
+  if (facing === "user") { s.translate(W, 0); s.scale(-1, 1); }
+  s.drawImage(video, 0, 0, W, H);
+  s.drawImage(out, 0, 0);
+  const flash = document.createElement("div"); flash.className = "flash";
+  document.body.append(flash); setTimeout(() => flash.remove(), 400);
+  snap.toBlob(async blob => {
+    const name = `navidad-ar-${new Date().toISOString().replace(/[:.]/g, "-")}.png`;
+    const file = new File([blob], name, { type: "image/png" });
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: "Navidad AR" }); return; }
+      catch (e) { if (e.name === "AbortError") return; }
+    }
+    const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+    a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }, "image/png");
+};
+
+document.addEventListener("visibilitychange", () => { if (!document.hidden) tracker.reset(); });
