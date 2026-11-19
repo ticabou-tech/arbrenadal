@@ -12,7 +12,11 @@ que iluminan su entorno y **nieve en 3D** que no atraviesa paredes ni techos.
 | Paredes   | Guirnalda de pino en festones con luces, lazos y sombra sobre la pared; nieve acumulada en tejados y muros (exterior) |
 | Todo      | Nieve en 3 capas de profundidad (lejos, media y bokeh cercano). En interior solo nieva tras las ventanas |
 
-Además permite **hacer fotos**, **cambiar de cámara**, **pausar**, **modo noche**,
+Las **fotos** se guardan directamente en una carpeta que eliges una vez (Chrome / Edge
+de escritorio, botón 📁; la app pide permiso de acceso), en Fotos mediante "Guardar
+imagen" en iPhone, o como descarga en Android y otros navegadores.
+
+Además permite **cambiar de cámara**, **pausar**, **modo noche**,
 **luces cálidas**, elegir **detección rápida o precisa** y ver las **máscaras** detectadas.
 
 ## Cómo funciona
@@ -30,6 +34,13 @@ cámara ──► seguimiento de movimiento (cada fotograma) ──► G: mundo 
   (WebGPU o WASM). No se envía ninguna imagen a ningún servidor. Se usan las
   **probabilidades** de cada clase (no solo la clase ganadora), se fusionan en el tiempo
   compensando el movimiento de la cámara, y las ventanas se ajustan a **cuadriláteros nítidos**.
+  La imagen entra con su **proporción real** (sin aplastarla) y se alterna con su versión
+  en **espejo**. Cuadros, puertas, cortinas o muebles altos cuentan como parte de la pared,
+  los paneles de una misma ventana se unen, y los bordes de ventanas y paredes se
+  **ajustan a las líneas reales** de la imagen (marcos, unión pared-techo, cornisas).
+- **Rendimiento**: modelo en **fp16** con WebGPU (cuantizado q8 en CPU), preprocesado
+  propio y **resolución adaptativa** (320–640 px) para mantener ~170 ms por análisis;
+  con el seguimiento de movimiento la animación va a 60 FPS aunque el modelo sea lento.
 - **Seguimiento (RA)**: flujo óptico por bloques contra un fotograma clave
   (traslación global + bloques refinados con Lucas-Kanade + ajuste robusto de
   traslación, giro y zoom). Toda la decoración vive en coordenadas de "mundo", así que
@@ -49,6 +60,7 @@ js/worker.js        IA de segmentación (Web Worker)
 js/tracker.js       Seguimiento del movimiento de la cámara
 js/scene.js         Fusión de análisis y geometría: ventanas, árboles, borde de paredes
 js/decor.js         Dibujo de la decoración (ventanas, árboles, paredes)
+js/photos.js        Guardado de fotos (carpeta con permiso, Fotos en iPhone o descarga)
 js/snow.js          Nieve en 3 capas con oclusión y colisiones
 js/sprites.js       Sprites pre-renderizados (bombillas, bolas, estrella, guirnalda…)
 js/geom.js          Utilidades geométricas

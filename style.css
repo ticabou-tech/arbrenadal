@@ -38,7 +38,7 @@ button:disabled { opacity: .5; cursor: default; }
 
 #actions {
   position: absolute; left: 0; right: 0; bottom: 0; z-index: 2;
-  display: flex; justify-content: center; align-items: center; gap: 28px;
+  display: flex; justify-content: center; align-items: center; gap: 20px;
   padding: 12px 12px max(16px, env(safe-area-inset-bottom));
 }
 #actions button { width: 52px; height: 52px; padding: 0; border-radius: 50%; font-size: 22px; background: var(--panel); }
@@ -47,3 +47,9 @@ button:disabled { opacity: .5; cursor: default; }
 
 .flash { position: absolute; inset: 0; z-index: 3; background: #fff; animation: flash .35s ease-out forwards; pointer-events: none; }
 @keyframes flash { from { opacity: .8; } to { opacity: 0; } }
+
+#toast {
+  position: absolute; left: 50%; bottom: calc(110px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 4;
+  max-width: calc(100% - 32px); padding: 10px 16px; border-radius: 999px;
+  background: rgba(12, 26, 20, .88); font-size: 15px; text-align: center;
+}
