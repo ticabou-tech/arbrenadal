@@ -21,6 +21,24 @@ navegadores.
 Además permite **cambiar de cámara**, **pausar**, **modo noche**,
 **luces cálidas**, elegir **detección rápida o precisa** y ver las **máscaras** detectadas.
 
+## Enseñar a la IA (🎓)
+
+Si la IA confunde cosas de tu sitio (una pared de cristal tomada por ventana, un seto
+tomado por árbol…), puedes enseñarle:
+
+1. Apunta a la zona y pulsa **🎓**: se congela la imagen.
+2. Pinta encima con el dedo: **Ventana**, **Pared**, **Árbol**, **Techo**, **Cielo** o
+   **Nada de esto** (para lo que confunde). Bastan unos trazos en cada elemento.
+3. Pulsa **Entrenar**. En unos segundos aprende y empieza a usarlo.
+
+Puedes enseñarle varias fotos (se acumulan) y desactivarlo con **Lo aprendido** u
+olvidarlo desde el mismo panel. Todo se queda en tu dispositivo.
+
+Por dentro: para cada zona de la imagen se guardan las 150 puntuaciones del modelo (una
+por tipo de objeto de ADE20K) y su color, y se entrena un clasificador lineal (regresión
+logística multiclase) que traduce esas puntuaciones a tus clases; su resultado se
+combina con el del modelo. Se guarda por modelo (rápido / preciso) en IndexedDB.
+
 ## Cómo funciona
 
 ```
@@ -62,6 +80,8 @@ js/worker.js        IA de segmentación (Web Worker)
 js/tracker.js       Seguimiento del movimiento de la cámara
 js/scene.js         Fusión de análisis y geometría: ventanas, árboles, borde de paredes
 js/decor.js         Dibujo de la decoración (ventanas, árboles, paredes)
+js/teach.js         Modo «Enseñar»: pintar, etiquetas y persistencia de lo aprendido
+js/store.js         Almacén persistente (IndexedDB)
 js/photos.js        Guardado de fotos (galería interna + carpeta con permiso, Guardar como, Fotos/Archivos en iPhone o descarga)
 js/snow.js          Nieve en 3 capas con oclusión y colisiones
 js/sprites.js       Sprites pre-renderizados (bombillas, bolas, estrella, guirnalda…)
