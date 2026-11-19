@@ -6,7 +6,7 @@
 //  · Preprocesado propio: la imagen llega ya al tamaño de entrada y con su proporción
 //    real (sin aplastarla a 512×512), así se calcula menos y se detecta mejor.
 //  · Opción de analizar la imagen en espejo (se alterna en cada análisis y se fusiona).
-import { TRANSFORMERS_URL, GROUPS, DTYPES } from "./config.js";
+import { TRANSFORMERS_URL, GROUPS } from "./config.js";
 
 const MEAN = [0.485, 0.456, 0.406], STD = [0.229, 0.224, 0.225];
 let T, model, groupIdx, backend, dtype;
@@ -16,34 +16,23 @@ self.onmessage = async ({ data }) => {
     if (data.type === "load") await load(data);
     else if (data.type === "infer") await infer(data);
   } catch (e) {
-    self.postMessage({ type: "error", id: data.id, message: e?.message || String(e), during: data.type });
+    // ONNX Runtime a veces lanza solo un número (código interno): se añade contexto.
+    const msg = e?.message || (typeof e === "number" ? `error interno del motor de IA (${e})` : String(e));
+    self.postMessage({ type: "error", id: data.id, message: msg, during: data.type });
   }
 };
 
-async function load({ models }) {
+// Carga UNA configuración (modelo + dispositivo + precisión). Si falla, el hilo principal
+// cierra este worker y prueba la siguiente en uno nuevo: así un fallo (p. ej. de WebGPU)
+// no deja el motor de inferencia bloqueado para los siguientes intentos.
+async function load({ model: id, device, dtype: dt }) {
   T = await import(TRANSFORMERS_URL);
   const progress_callback = p => { if (p.status === "progress") self.postMessage({ type: "progress", file: p.file, loaded: p.loaded, total: p.total }); };
-  const devices = ("gpu" in navigator) ? ["webgpu", "wasm"] : ["wasm"];
-  let lastErr;
-  for (const id of models) {
-    for (const device of devices) {
-      for (const dt of DTYPES[device]) {
-        try {
-          model = await T.AutoModelForSemanticSegmentation.from_pretrained(id, { device, dtype: dt, progress_callback });
-          buildGroups();
-          await infer({ id: -1, width: 128, height: 96, buffer: new Uint8ClampedArray(128 * 96 * 4).buffer }, true);
-          backend = device === "webgpu" ? "WebGPU" : "WASM"; dtype = dt;
-          self.postMessage({ type: "ready", backend, dtype, model: id });
-          return;
-        } catch (e) {
-          lastErr = e; console.warn(`No se pudo usar ${id} (${device}, ${dt}):`, e?.message || e);
-          try { await model?.dispose?.(); } catch { /* nada */ }
-          model = null;
-        }
-      }
-    }
-  }
-  throw lastErr || new Error("no se pudo cargar el modelo");
+  model = await T.AutoModelForSemanticSegmentation.from_pretrained(id, { device, dtype: dt, progress_callback });
+  buildGroups();
+  await infer({ id: -1, width: 128, height: 96, buffer: new Uint8ClampedArray(128 * 96 * 4).buffer }, true);
+  backend = device === "webgpu" ? "WebGPU" : "WASM"; dtype = dt;
+  self.postMessage({ type: "ready", backend, dtype, model: id });
 }
 
 function buildGroups() {
