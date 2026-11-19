@@ -10,31 +10,13 @@
 //    · Resto (Android, Firefox…): descarga a la carpeta Descargas.
 // Los permisos se piden dentro del toque del usuario (si no, el navegador los rechaza).
 
+import { kv } from "./store.js";
+
 export const folderSupported = "showDirectoryPicker" in window;
 const saveAsSupported = "showSaveFilePicker" in window;
 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-// ---------------------------------------------------------------------------
-// Persistencia del permiso de carpeta (IndexedDB)
-// ---------------------------------------------------------------------------
-function db() {
-  return new Promise((res, rej) => {
-    const r = indexedDB.open("navidad-ar", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("kv");
-    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-  });
-}
-async function kv(key, value) {
-  try {
-    const d = await db();
-    return await new Promise((res, rej) => {
-      const tx = d.transaction("kv", value === undefined ? "readonly" : "readwrite"), st = tx.objectStore("kv");
-      const r = value === undefined ? st.get(key) : st.put(value, key);
-      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
-    });
-  } catch { return undefined; }
-}
-
+// El permiso de carpeta se recuerda en IndexedDB.
 let dir = null, dirLoaded = false;
 const dirReady = kv("photoDir").then(d => { dir = d || null; dirLoaded = true; });
 

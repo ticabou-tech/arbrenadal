@@ -27,6 +27,13 @@ export const GROUPS = {
   sky: /^sky\b/i,
 };
 
+// Clases que el usuario puede pintar en el modo "Enseñar" (el orden importa: índice = etiqueta).
+export const TEACH_CLASSES = ["window", "wall", "tree", "ceiling", "sky", "other"];
+export const TEACH_UI = [
+  { name: "Ventana", color: "#3d8bff" }, { name: "Pared", color: "#ff9a3c" }, { name: "Árbol", color: "#3ccf5a" },
+  { name: "Techo", color: "#b46bff" }, { name: "Cielo", color: "#7fd6ff" }, { name: "Nada de esto", color: "#9e9e9e" },
+];
+
 export const CONFIG = {
   trackWidth: 160,        // ancho al que se calcula el movimiento de la cámara
   blend: 0.5,             // peso de cada análisis nuevo al fusionar con lo anterior

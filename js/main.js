@@ -7,6 +7,7 @@ import { Scene } from "./scene.js";
 import { Snow } from "./snow.js";
 import { drawWindows, drawTrees, drawWall, updateSwing } from "./decor.js";
 import { mkCanvas } from "./sprites.js";
+import { Teacher } from "./teach.js";
 import { savePhoto, chooseFolder, folderSupported, folderName, listPhotos, deletePhoto, exportPhoto } from "./photos.js";
 
 const $ = id => document.getElementById(id);
@@ -29,6 +30,7 @@ let W = 0, H = 0, G = I();          // G: mundo → pantalla (píxeles de vídeo
 let stream = null, facing = "environment";
 let worker = null, workerReady = false, busy = false, pendingG = null, pendingGray = null, inferMs = 0, backend = "", modelName = "", dtype = "";
 let sizeIdx = SIZES.indexOf(START_SIZE.fast), flip = false, sizeCooldown = 0;
+let teaching = false, teachWait = null, currentModel = "";
 let running = false, paused = false, lastT = 0, epoch = 0;
 
 // ---------------------------------------------------------------------------
@@ -121,9 +123,12 @@ function loadWorker(cfg, quality) {
         modelName = data.model.includes("b2") ? "preciso" : "rápido";
         sizeIdx = SIZES.indexOf(START_SIZE[data.model.includes("b2") ? "precise" : "fast"]);
         if (quality === "precise" && !data.model.includes("b2")) setTimeout(() => toast("El modelo preciso no está disponible en este dispositivo: se usa el rápido"), 500);
-        progress.hidden = true; resolve();
+        progress.hidden = true; currentModel = data.model; teacher.restore(currentModel); resolve();
+      } else if (["trainprogress", "trained", "adapterloaded"].includes(data.type)) {
+        teacher.onMessage(data, currentModel);
       } else if (data.type === "result") {
         busy = false;
+        if (data.teach && teachWait) { teachWait.res({ image: teachWait.image, gw: data.gw, gh: data.gh }); teachWait = null; }
         if (data.epoch !== epoch) return;
         inferMs = inferMs ? inferMs * 0.8 + data.ms * 0.2 : data.ms;
         adaptSize(data.ms); inferErrors = 0;
@@ -131,6 +136,8 @@ function loadWorker(cfg, quality) {
       } else if (data.type === "error") {
         busy = false;
         if (data.during === "load") { progress.hidden = true; reject(new Error(data.message)); }
+        else if (data.during !== "infer") teacher.onError(data.message);
+        else if (teachWait) { teachWait.rej(new Error(data.message)); teachWait = null; }
         else onInferError(data.message);
       }
     };
@@ -176,11 +183,15 @@ function adaptSize(ms) {
 }
 
 function requestInference() {
-  if (!workerReady || busy || paused || document.hidden || video.readyState < 2) return;
+  if (!workerReady || busy || paused || teaching || document.hidden || video.readyState < 2) return;
+  sendFrame(video, false);
+}
+
+function sendFrame(source, teach) {
   busy = true;
   const w = SIZES[sizeIdx], h = Math.max(128, Math.round(w * H / W / 32) * 32);
   if (cap.width !== w || cap.height !== h) { cap.width = w; cap.height = h; }
-  cctx.drawImage(video, 0, 0, w, h);
+  cctx.drawImage(source, 0, 0, w, h);
   const img = cctx.getImageData(0, 0, w, h);
   pendingG = { ...G };              // posición de la cámara en el momento de la captura
   // Copia en grises para ajustar los bordes de ventanas y paredes a las líneas de la imagen.
@@ -188,10 +199,26 @@ function requestInference() {
   for (let i = 0, j = 0; i < gray.length; i++, j += 4) gray[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8;
   pendingGray = { w, h, data: gray };
   estimateLight(img);
-  flip = !flip;                     // alterna imagen normal / espejo: se fusionan en el tiempo
+  flip = teach ? false : !flip;     // alterna imagen normal / espejo: se fusionan en el tiempo
   const e = epoch;
-  worker.postMessage({ type: "infer", id: e, epoch: e, width: w, height: h, flip, buffer: img.data.buffer }, [img.data.buffer]);
+  worker.postMessage({ type: "infer", id: e, epoch: e, width: w, height: h, flip, teach, buffer: img.data.buffer }, [img.data.buffer]);
 }
+
+// Modo "Enseñar": congela el fotograma actual y lo analiza guardando sus características.
+const teacher = new Teacher({
+  post: (msg, transfer) => worker?.postMessage(msg, transfer || []),
+  toast: msg => toast(msg),
+  modelId: () => currentModel,
+  done: () => { teaching = false; },
+  capture: async () => {
+    if (!workerReady) throw new Error("el modelo aún no está listo");
+    teaching = true;
+    while (busy) await new Promise(r => setTimeout(r, 30));
+    const image = mkCanvas(W, H);
+    image.getContext("2d").drawImage(video, 0, 0, W, H);
+    return new Promise((res, rej) => { teachWait = { res, rej, image }; sendFrame(image, true); });
+  },
+});
 
 function estimateLight({ data, width: w, height: h }) {
   let r = 0, g = 0, b = 0, L = 0, Rr = 0, T = 0, Bt = 0, n = 0;

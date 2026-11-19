@@ -23,6 +23,7 @@
     <label class="chip"><input type="checkbox" id="fx-warm"> Luces cálidas</label>
     <label class="chip"><input type="checkbox" id="fx-night"> Noche</label>
     <label class="chip"><input type="checkbox" id="fx-debug"> Ver máscaras</label>
+    <label class="chip learned" id="learned-chip" hidden><input type="checkbox" id="fx-learned" checked> Lo aprendido</label>
     <label class="chip">Detección
       <select id="quality">
         <option value="fast">Rápida</option>
@@ -40,11 +41,27 @@
   <button id="pause" title="Pausar" aria-label="Pausar">⏸️</button>
   <button id="folder" title="Elegir carpeta para guardar las fotos" aria-label="Elegir carpeta de fotos">📁</button>
   <button id="gallery" title="Fotos guardadas" aria-label="Fotos guardadas">🖼️</button>
+  <button id="teach" title="Enseñar a la IA" aria-label="Enseñar a la IA">🎓</button>
 </footer>
 <section id="gallery-view" hidden aria-label="Fotos guardadas">
   <header><h2>Fotos guardadas</h2><button id="gallery-close" aria-label="Cerrar">✕</button></header>
   <p id="gallery-empty">Todavía no hay fotos. Pulsa 📸 para hacer una.</p>
   <div id="gallery-grid"></div>
+</section>
+<section id="teach-view" hidden aria-label="Enseñar a la IA">
+  <p class="teach-help">Pinta encima de la foto con el color de cada cosa. No hace falta pintarlo todo: unos trazos en cada elemento bastan. Usa <b>Nada de esto</b> para lo que la IA confunde.</p>
+  <div id="teach-stage"><canvas id="teach-photo"></canvas><canvas id="teach-paint"></canvas></div>
+  <div id="teach-palette"></div>
+  <div class="teach-row">
+    <label>Pincel <input type="range" id="teach-size" min="8" max="90" value="36"></label>
+    <button id="teach-eraser">🧽 Goma</button>
+    <button id="teach-undo">↶ Deshacer</button>
+  </div>
+  <div class="teach-row">
+    <button id="teach-cancel">Cancelar</button>
+    <button id="teach-forget">Olvidar lo aprendido</button>
+    <button id="teach-train" class="primary">Entrenar</button>
+  </div>
 </section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
