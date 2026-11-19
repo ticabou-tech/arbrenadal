@@ -1,6 +1,6 @@
 // Navidad AR — bucle principal: cámara, seguimiento de movimiento, análisis con IA
 // (en un Web Worker) y dibujo de la decoración y la nieve.
-import { CONFIG, MODELS, SIZES, START_SIZE, TARGET_MS } from "./config.js";
+import { CONFIG, MODELS, DTYPES, SIZES, START_SIZE, TARGET_MS } from "./config.js";
 import { I, compose, scaleOf } from "./geom.js";
 import { Tracker } from "./tracker.js";
 import { Scene } from "./scene.js";
@@ -77,14 +77,40 @@ function pollVideoFrame() {          // alternativa si no existe requestVideoFra
 // ---------------------------------------------------------------------------
 // Modelo (Web Worker)
 // ---------------------------------------------------------------------------
-function startWorker(quality) {
-  worker?.terminate();
+// ¿Hay de verdad una GPU utilizable? (navigator.gpu puede existir sin adaptador.)
+async function probeGPU() {
+  try {
+    const a = await navigator.gpu?.requestAdapter();
+    return a ? { gpu: true, f16: a.features.has("shader-f16") } : { gpu: false };
+  } catch { return { gpu: false }; }
+}
+
+// Prueba configuraciones de mejor a peor, cada una en un worker nuevo.
+async function startWorker(quality, noGPU = false) {
+  worker?.terminate(); worker = null;
   workerReady = false; busy = false;
-  worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
+  const { gpu, f16 } = noGPU ? { gpu: false } : await probeGPU();
+  const models = quality === "precise" ? [MODELS.precise, MODELS.fast] : [MODELS.fast];
+  const tries = [];
+  for (const model of models) {
+    if (gpu) for (const dtype of DTYPES.webgpu) if (dtype !== "fp16" || f16) tries.push({ model, device: "webgpu", dtype });
+    for (const dtype of DTYPES.wasm) tries.push({ model, device: "wasm", dtype });
+  }
+  let lastErr;
+  for (const cfg of tries) {
+    try { await loadWorker(cfg, quality); return; }
+    catch (e) { lastErr = e; console.warn(`No se pudo usar ${cfg.model} (${cfg.device}, ${cfg.dtype}):`, e.message); worker?.terminate(); worker = null; }
+  }
+  throw new Error("no se pudo cargar el modelo de IA" + (lastErr ? ` (${lastErr.message})` : ""));
+}
+
+function loadWorker(cfg, quality) {
+  const w = worker = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   const files = {}, bar = $("bar"), progress = $("progress");
-  progress.hidden = false; bar.style.width = "0";
+  progress.hidden = false;
   return new Promise((resolve, reject) => {
-    worker.onmessage = ({ data }) => {
+    w.onmessage = ({ data }) => {
+      if (w !== worker) return;
       if (data.type === "progress" && data.total) {
         files[data.file] = [data.loaded, data.total];
         const [l, tt] = Object.values(files).reduce((a, [x, y]) => [a[0] + x, a[1] + y], [0, 0]);
@@ -100,24 +126,50 @@ function startWorker(quality) {
         busy = false;
         if (data.epoch !== epoch) return;
         inferMs = inferMs ? inferMs * 0.8 + data.ms * 0.2 : data.ms;
-        adaptSize(data.ms);
+        adaptSize(data.ms); inferErrors = 0;
         scene.ingest(data, pendingG, pendingGray);
       } else if (data.type === "error") {
         busy = false;
         if (data.during === "load") { progress.hidden = true; reject(new Error(data.message)); }
-        else { console.error(data.message); setStatus("Error al analizar: " + data.message); }
+        else onInferError(data.message);
       }
     };
-    worker.onerror = e => { progress.hidden = true; reject(new Error(e.message || "no se pudo iniciar el worker")); };
-    const models = quality === "precise" ? [MODELS.precise, MODELS.fast] : [MODELS.fast];
-    worker.postMessage({ type: "load", models });
+    w.onerror = e => { e.preventDefault?.(); progress.hidden = true; reject(new Error(e.message || "no se pudo iniciar el worker")); };
+    setStatus(`Cargando modelo (${cfg.device === "webgpu" ? "GPU" : "CPU"}, ${cfg.dtype})…`);
+    w.postMessage({ type: "load", ...cfg });
   });
+}
+
+// Si el análisis falla varias veces seguidas (p. ej. falta de memoria con una entrada
+// grande), se baja la resolución; si aun así falla, se recarga el modelo con otra configuración.
+let inferErrors = 0;
+function onInferError(msg) {
+  console.error(msg);
+  inferErrors++;
+  if (sizeIdx > 0) { sizeIdx--; sizeCooldown = 20; }
+  setStatus("Error al analizar: " + msg + " — reintentando");
+  if (inferErrors >= 4) {
+    inferErrors = 0;
+    startWorker($("quality").value).catch(e => setStatus("Error: " + e.message));
+  }
 }
 
 // Resolución adaptativa: sube o baja el tamaño de entrada para mantener ~TARGET_MS por
 // análisis. Con el seguimiento de movimiento, la animación va fluida aunque el modelo
 // sea lento; esto mantiene además la detección al día.
+let slowCount = 0;
 function adaptSize(ms) {
+  // Muy lento: baja ya, sin esperar. Si con la entrada mínima la GPU sigue siendo muy
+  // lenta (GPU débil), se cambia a la CPU.
+  if (ms > TARGET_MS * 4 && sizeIdx > 0) { sizeIdx--; sizeCooldown = 3; return; }
+  if (backend === "WebGPU" && sizeIdx === 0 && ms > 1200) {
+    if (++slowCount >= 3) {
+      slowCount = 0; toast("La GPU de este dispositivo es lenta: se usa la CPU");
+      startWorker($("quality").value, true).catch(e => setStatus("Error: " + e.message));
+    }
+    return;
+  }
+  slowCount = 0;
   if (--sizeCooldown > 0) return;
   if (ms > TARGET_MS * 1.35 && sizeIdx > 0) { sizeIdx--; sizeCooldown = 6; }
   else if (inferMs < TARGET_MS * 0.6 && sizeIdx < SIZES.length - 1) { sizeIdx++; sizeCooldown = 10; }
