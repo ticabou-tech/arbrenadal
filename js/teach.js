@@ -34,7 +34,8 @@ export class Teacher {
     $("share-import").onchange = e => this.importFile(e.target.files[0]);
     $("zone-mode").onchange = () => this.sendMode();
     $("only-zones").onchange = () => this.sendMode();
-    $("only-zones").checked = pref("onlyZones") === "1";
+    // Por defecto, con zonas entrenadas solo se decora dentro de ellas.
+    $("only-zones").checked = pref("onlyZones") !== "0";
     this.initCloud();
     this.bindPaint();
     addEventListener("resize", () => this.fit());

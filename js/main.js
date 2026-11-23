@@ -60,7 +60,11 @@ function resize() {
 function onVideoFrame() {
   if (running && !paused && W) {
     if (video.videoWidth !== W || video.videoHeight !== H) resize();
+    const lost0 = tracker.lostCount || 0;
     const M = tracker.update(video, W, H);
+    // Seguimiento perdido (movimiento brusco, desenfoque): las posiciones ya no son
+    // fiables, así que se ocultan los adornos hasta que el siguiente análisis los confirme.
+    if ((tracker.lostCount || 0) !== lost0) scene.markLost();
     G = compose(M, G);
     snow.onMotion(M);
     const now = performance.now(), fdt = Math.max(0.01, (now - (onVideoFrame.t || now - 33)) / 1000); onVideoFrame.t = now;
@@ -316,9 +320,9 @@ function updateStatus(t) {
   lastStatus = t;
   if (!scene.ready) { setStatus("✨ Mirando a tu alrededor…"); return; }
   const found = [];
-  if (scene.trees.some(tr => !tr.miss)) found.push("🎄 Árbol");
-  if (scene.windows.some(w => !w.miss)) found.push("🪟 Ventana");
-  if ([...scene.garland.values()].some(g => g.seen >= scene.frameNo - 1)) found.push("🌿 Pared");
+  if (scene.trees.some(tr => tr.seen >= 2 && scene.fresh(tr.last))) found.push("🎄 Árbol");
+  if (scene.windows.some(w => w.seen >= 2 && scene.fresh(w.last))) found.push("🪟 Ventana");
+  if ([...scene.garland.values()].some(g => g.hits >= 2 && scene.fresh(g.seen))) found.push("🌿 Pared");
   const zone = teacher.statusText();
   const zoneTxt = zone.startsWith("zona: ") ? "📍 " + zone.slice(6) : zone.includes("no se decora") ? "📍 Fuera de tus zonas" : "";
   let msg = found.length ? found.join(" · ") : "👀 Apunta a una ventana, un árbol o una pared";

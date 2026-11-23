@@ -50,7 +50,7 @@ export function updateSwing(dt, accelX) {
 export function drawWindows(R, scene, G, t, opts) {
   const ctx = R.d, s = scaleOf(G), pattern = drawWindows.pattern ||= ctx.createPattern(SPRITES.frost, "repeat");
   for (const w of scene.windows) {
-    if (w.seen < 2) continue;                                 // espera a confirmar la ventana
+    if (w.seen < 2 || !scene.fresh(w.last)) continue;         // solo ventanas confirmadas y vistas ahora
     const P = toScreen(G, w.pts);
     if (offscreen(P, scene.W, scene.H)) continue;
     const side = Math.min(Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1]), Math.hypot(P[3][0] - P[0][0], P[3][1] - P[0][1]));
@@ -116,7 +116,7 @@ const tinselLayer = mkCanvas();
 
 export function drawTrees(R, scene, G, t, dt, opts) {
   const ctx = R.d, s = scaleOf(G), { W, H } = scene;
-  const visibleTrees = scene.trees.filter(tr => tr.seen >= 2);
+  const visibleTrees = scene.trees.filter(tr => tr.seen >= 2 && scene.fresh(tr.last));
 
   // Espumillón dorado colgando en curvas, recortado con la silueta del árbol.
   if (visibleTrees.length) {
@@ -204,6 +204,7 @@ export function drawWall(R, scene, G, t, opts) {
   const segs = []; let cur = [], last = null;
   for (const key of keys) {
     const g = scene.garland.get(key);
+    if (g.hits < 2 || !scene.fresh(g.seen)) { if (cur.length) { segs.push(cur); cur = []; } last = null; continue; }   // solo bordes confirmados
     if (last !== null && key - last > 2) { segs.push(cur); cur = []; }
     const [x, y] = apply(G, g.x, g.y);
     cur.push({ x, y, snowy: g.snowy }); last = key;

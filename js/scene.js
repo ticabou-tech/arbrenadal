@@ -24,7 +24,8 @@ export class Scene {
     this.windows = [];            // { pts: [[x,y]×4] (mundo), miss }
     this.trees = [];              // { top, bl, br, w, miss } (mundo)
     this.decor = new Map();       // clave de celda -> { x, y, kind, c, p, alpha, target }
-    this.garland = new Map();     // cubo -> { x, y, snowy, miss }
+    this.garland = new Map();     // cubo -> { x, y, snowy, miss, seen, hits }
+    this.frameNo = 0; this.lostAt = -1; this.noBlend = false;
     this.sp = W / 30;             // separación de la rejilla de adornos (unidades de mundo)
     this.gsp = W / 44;            // separación de los puntos de la guirnalda
   }
@@ -62,12 +63,27 @@ export class Scene {
     return x > -margin && y > -margin && x < this.W + margin && y < this.H + margin;
   }
 
+  // Seguimiento perdido: nada se dibuja hasta que un análisis nuevo lo vuelva a confirmar.
+  markLost() {
+    this.lostAt = this.frameNo; this.noBlend = true;
+    for (const d of this.decor.values()) { d.alpha = 0; d.target = 0; }
+  }
+
+  // ¿Se ha visto este objeto en los últimos análisis (y después de perder el seguimiento)?
+  // Solo lo confirmado recientemente se dibuja: así no quedan adornos donde ya no hay nada.
+  fresh(seenFrame) { return seenFrame >= this.frameNo - 1 && seenFrame > this.lostAt; }
+
   // ---------------------------------------------------------------------------
   ingest({ gw, gh, maps }, Gcap, gray) {
     this.gray = gray;
     this.frameNo = (this.frameNo || 0) + 1;
+    const noBlend = this.noBlend; this.noBlend = false;
     const a = CONFIG.blend;
-    if (this.maps && this.gw === gw && this.gh === gh) {
+    // Se fusiona con lo anterior solo si la cámara apenas se ha movido entre análisis y el
+    // seguimiento no se ha perdido; si no, lo antiguo podría dejar "fantasmas".
+    const Dm = this.maps ? compose(this.Gref, invert(Gcap)) : null;
+    const moved = Dm ? Math.hypot(Dm.tx, Dm.ty) / this.W + Math.abs(Math.hypot(Dm.a, Dm.b) - 1) : 0;
+    if (this.maps && this.gw === gw && this.gh === gh && !noBlend && moved < 0.2) {
       // Lleva el mapa acumulado al punto de vista del nuevo fotograma y lo fusiona.
       const D = compose(this.Gref, invert(Gcap));         // vídeo nuevo → vídeo anterior
       const sx = this.W / gw, sy = this.H / gh;
@@ -270,10 +286,10 @@ export class Scene {
         const oc = center(o.pts), d = Math.hypot(oc[0] - fc[0], oc[1] - fc[1]);
         if (d < Math.max(fs, size(o.pts)) * 0.5 && d < bd) { bd = d; best = i; }
       });
-      if (best < 0) { next.push({ pts: fp, miss: 0, seen: 1, cut: fp.cut }); continue; }
+      if (best < 0) { next.push({ pts: fp, miss: 0, seen: 1, cut: fp.cut, last: this.frameNo }); continue; }
       used.add(best);
       const o = known[best];
-      next.push({ ...o, pts: o.pts.map((p, i) => [p[0] * (1 - k) + fp[i][0] * k, p[1] * (1 - k) + fp[i][1] * k]), miss: 0, seen: o.seen + 1, cut: fp.cut });
+      next.push({ ...o, pts: o.pts.map((p, i) => [p[0] * (1 - k) + fp[i][0] * k, p[1] * (1 - k) + fp[i][1] * k]), miss: 0, seen: o.seen + 1, cut: fp.cut, last: this.frameNo });
     }
     known.forEach((o, i) => {
       if (used.has(i)) return;
@@ -323,7 +339,7 @@ export class Scene {
       }
     }
     for (const [key, d] of this.decor) {
-      if (!seen.has(key) && this.inRefView(d.x, d.y)) d.target = 0;
+      if (!seen.has(key)) d.target = 0;
       if (d.target === 0 && d.alpha < 0.02) this.decor.delete(key);
     }
   }
@@ -342,8 +358,8 @@ export class Scene {
       seen.add(key);
       const snowy = this.maps.sky[Math.max(0, y - 2) * gw + x] > 0.3;
       const g = this.garland.get(key);
-      if (g) { g.y = g.y * 0.6 + wy * 0.4; g.x = key * this.gsp; g.miss = 0; g.snowy = snowy; g.seen = this.frameNo; }
-      else this.garland.set(key, { x: key * this.gsp, y: wy, snowy, miss: 0, seen: this.frameNo });
+      if (g) { g.y = g.y * 0.6 + wy * 0.4; g.x = key * this.gsp; g.miss = 0; g.snowy = snowy; g.hits = g.seen === this.frameNo - 1 ? g.hits + 1 : 1; g.seen = this.frameNo; }
+      else this.garland.set(key, { x: key * this.gsp, y: wy, snowy, miss: 0, seen: this.frameNo, hits: 1 });
     }
     for (const [key, g] of this.garland) {
       if (seen.has(key)) continue;

@@ -155,24 +155,45 @@ async function handleTeach(data) {
     self.postMessage({ type: "retrained", zoneId: data.zoneId, ok: !!r, W: r?.W, acc: r?.acc, D });
   } else if (data.type === "zones") {               // [{ id, D, W, descs }]
     zones = data.zones.filter(z => z.D === D && z.W?.length === K * D).map(z => ({ ...z, tau: zoneTau(z.descs || []) }));
-    zoneDist.clear();
+    zoneDist.clear(); if (!zones.some(z => z.id === activeZone)) activeZone = null;
   } else if (data.type === "zoneMode") { zoneMode = data.mode; onlyZones = data.only; }
 }
 
-// Elige la zona activa para la vista actual. Devuelve { zone, d, tau } o null.
+// Elige la zona activa para la vista actual, con histéresis: para ENTRAR en una zona hace
+// falta reconocerla en 2 análisis seguidos y para SALIR, no reconocerla en 3; así un
+// fotograma movido o borroso no activa ni quita una zona. Devuelve { zone, d, tau, match }.
+let activeZone = null, enterCand = null, enterCount = 0, exitCount = 0;
 function pickZone(desc) {
-  if (zoneMode === "none" || !zones.length) return null;
+  if (zoneMode === "none" || !zones.length) { activeZone = null; return null; }
   const cand = zoneMode === "auto" ? zones : zones.filter(z => z.id === zoneMode);
   let best = null;
   for (const z of cand) {
     const d = z.descs?.length ? Math.min(...z.descs.map(e => dist(e, desc))) : 0;
-    const e = zoneDist.has(z.id) ? zoneDist.get(z.id) * 0.6 + d * 0.4 : d;
+    const e = zoneDist.has(z.id) && isFinite(zoneDist.get(z.id)) ? zoneDist.get(z.id) * 0.6 + d * 0.4 : d;
     zoneDist.set(z.id, e);
     if (!best || e < best.d) best = { zone: z, d: e, tau: z.tau };
   }
   if (!best) return null;
-  best.match = zoneMode !== "auto" || !best.zone.descs?.length || best.d < best.tau;
-  return best;
+  if (zoneMode !== "auto") { activeZone = best.zone.id; return { ...best, match: true }; }
+  const ok = !best.zone.descs?.length || best.d < best.tau;
+  const cur = zones.find(z => z.id === activeZone);
+  const stay = cur && zoneDist.get(cur.id) < cur.tau * 1.25;             // margen para no salir por poco
+  if (stay) {
+    exitCount = 0;
+    if (ok && best.zone.id !== cur.id && best.d < zoneDist.get(cur.id) * 0.7) {   // otra zona claramente mejor
+      if (enterCand === best.zone.id) { if (++enterCount >= 2) { activeZone = best.zone.id; enterCount = 0; } }
+      else { enterCand = best.zone.id; enterCount = 1; }
+    }
+  } else if (ok) {
+    if (enterCand === best.zone.id) { if (++enterCount >= 2) { activeZone = best.zone.id; enterCount = 0; exitCount = 0; } }
+    else { enterCand = best.zone.id; enterCount = 1; }
+    if (cur && ++exitCount >= 3) activeZone = activeZone === cur.id ? null : activeZone;
+  } else {
+    enterCand = null; enterCount = 0;
+    if (cur && ++exitCount >= 3) { activeZone = null; exitCount = 0; }
+  }
+  const act = zones.find(z => z.id === activeZone);
+  return act ? { zone: act, d: zoneDist.get(act.id), tau: act.tau, match: true } : { ...best, match: false };
 }
 
 async function infer({ id, epoch, width: w, height: h, buffer, flip, teach }, warmup = false) {
@@ -231,10 +252,15 @@ async function infer({ id, epoch, width: w, height: h, buffer, flip, teach }, wa
       let sum = 0; for (let k = 0; k < K; k++) { z[k] = Math.exp(z[k] - zm); sum += z[k]; }
       for (let k = 0; k < K; k++) A[k][i] = z[k] / sum;
     }
+    // Combinación: lo aprendido pesa un 60 %. Lo que en esta zona no se pintó nunca queda
+    // por debajo del umbral (solo se decora lo enseñado), y lo pintado como "Nada de
+    // esto" apaga cualquier detección en ese sitio.
+    const other = A[K - 1];
     for (let k = 0; k < K - 1; k++) {
       const m = maps[TEACH_CLASSES[k]], a = A[k];
-      if (m) for (let i = 0; i < N; i++) m[i] = 0.2 * m[i] + 0.8 * a[i];
+      if (m) for (let i = 0; i < N; i++) m[i] = (0.4 * m[i] + 0.6 * a[i]) * (1 - 0.8 * other[i]);
     }
+    for (const n of ["onwall"]) if (maps[n]) for (let i = 0; i < N; i++) maps[n][i] *= 1 - 0.8 * other[i];
   } else if (onlyZones && zones.length) {
     for (const n of ["window", "wall", "onwall", "tree"]) maps[n]?.fill(0);
   }
