@@ -83,7 +83,7 @@ function descriptor(logp, C, N, gw, gh, x, N0, w, flip) {
   return out;
 }
 
-const dist = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s / a.length); };
+const dist = (a, b) => { if (a.length !== b.length) return Infinity; let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s / a.length); };
 
 // Umbral de reconocimiento de una zona: según lo distintas que son sus propias fotos.
 function zoneTau(descs) {

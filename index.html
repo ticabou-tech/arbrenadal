@@ -3,86 +3,142 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0c1a14">
-<meta name="description" content="Realidad aumentada navideña: detecta ventanas, paredes y árboles con la cámara y los decora, con nieve en 3D.">
+<meta name="theme-color" content="#0b2a1f">
+<meta name="description" content="Realidad aumentada navideña: apunta con la cámara y mira cómo se decoran tus ventanas, paredes y árboles, con nieve en 3D.">
 <title>Navidad AR</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎄</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@700&family=Nunito:wght@400;600;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <video id="video" playsinline muted></video>
 <canvas id="out"></canvas>
 
-<header id="ui">
-  <button id="start" class="primary">Empezar</button>
-  <div id="toggles">
-    <label class="chip window"><input type="checkbox" id="fx-window" checked> Ventanas</label>
-    <label class="chip tree"><input type="checkbox" id="fx-tree" checked> Árboles</label>
-    <label class="chip wall"><input type="checkbox" id="fx-wall" checked> Paredes</label>
-    <label class="chip snow"><input type="checkbox" id="fx-snow" checked> Nieve</label>
-    <label class="chip"><input type="checkbox" id="fx-warm"> Luces cálidas</label>
-    <label class="chip"><input type="checkbox" id="fx-night"> Noche</label>
-    <label class="chip"><input type="checkbox" id="fx-debug"> Ver máscaras</label>
-    <label class="chip learned" id="zone-chip" hidden>Zona <select id="zone-mode"><option value="auto">Automática</option></select></label>
-    <label class="chip learned" id="only-chip" hidden><input type="checkbox" id="only-zones"> Solo en mis zonas</label>
-    <label class="chip">Detección
-      <select id="quality">
-        <option value="fast">Rápida</option>
-        <option value="precise">Precisa (más lenta)</option>
-      </select>
-    </label>
+<!-- ===== Bienvenida ===== -->
+<section id="welcome">
+  <div class="sky" aria-hidden="true"><i></i><i></i><i></i></div>
+  <div class="lights" aria-hidden="true"></div>
+  <div class="welcome-card">
+    <div class="welcome-tree" aria-hidden="true">🎄</div>
+    <h1>Navidad <span>AR</span></h1>
+    <p class="tagline">Apunta con la cámara y mira cómo se decora tu casa</p>
+    <ul class="features">
+      <li><span>🪟</span>Ventanas con escarcha</li>
+      <li><span>🎄</span>Árboles con luces</li>
+      <li><span>🌿</span>Paredes con guirnaldas</li>
+      <li><span>❄️</span>Nieve de verdad</li>
+    </ul>
+    <button id="start" class="btn-magic">✨ Empezar la magia</button>
+    <div id="progress" hidden><div id="bar"></div></div>
+    <p id="load-msg" class="hint">Te pediremos permiso para usar la cámara</p>
   </div>
-  <p id="status" role="status" aria-live="polite">Pulsa Empezar y permite el acceso a la cámara.</p>
-  <div id="progress" hidden><div id="bar"></div></div>
+</section>
+
+<!-- ===== Barra superior (durante la experiencia) ===== -->
+<header id="ui" hidden>
+  <div class="brand">🎄 <span>Navidad AR</span></div>
+  <p id="status" class="pill" role="status" aria-live="polite">Preparando la magia…</p>
+  <button id="settings-btn" class="icon-btn" aria-label="Ajustes" title="Ajustes">⚙️</button>
 </header>
 
-<footer id="actions" hidden>
-  <button id="flip" title="Cambiar de cámara" aria-label="Cambiar de cámara">🔄</button>
-  <button id="photo" class="primary round" title="Hacer foto" aria-label="Hacer foto">📸</button>
-  <button id="pause" title="Pausar" aria-label="Pausar">⏸️</button>
-  <button id="folder" title="Elegir carpeta para guardar las fotos" aria-label="Elegir carpeta de fotos">📁</button>
-  <button id="gallery" title="Fotos guardadas" aria-label="Fotos guardadas">🖼️</button>
-  <button id="teach" title="Enseñar a la IA" aria-label="Enseñar a la IA">🎓</button>
-</footer>
-<section id="gallery-view" hidden aria-label="Fotos guardadas">
-  <header><h2>Fotos guardadas</h2><button id="gallery-close" aria-label="Cerrar">✕</button></header>
-  <p id="gallery-empty">Todavía no hay fotos. Pulsa 📸 para hacer una.</p>
-  <div id="gallery-grid"></div>
+<!-- ===== Ajustes ===== -->
+<section id="settings" class="sheet" hidden aria-label="Ajustes">
+  <header class="sheet-head"><h2>⚙️ Ajustes</h2><button id="settings-close" class="icon-btn" aria-label="Cerrar">✕</button></header>
+  <div class="sheet-body">
+    <h3>Decoración</h3>
+    <div class="tiles">
+      <label class="tile"><input type="checkbox" id="fx-window" checked><span><em>🪟</em>Ventanas</span></label>
+      <label class="tile"><input type="checkbox" id="fx-tree" checked><span><em>🎄</em>Árboles</span></label>
+      <label class="tile"><input type="checkbox" id="fx-wall" checked><span><em>🌿</em>Paredes</span></label>
+      <label class="tile"><input type="checkbox" id="fx-snow" checked><span><em>❄️</em>Nieve</span></label>
+    </div>
+    <h3>Ambiente</h3>
+    <div class="tiles">
+      <label class="tile"><input type="checkbox" id="fx-warm"><span><em>🕯️</em>Luces cálidas</span></label>
+      <label class="tile"><input type="checkbox" id="fx-night"><span><em>🌙</em>Modo noche</span></label>
+    </div>
+    <h3>Detección</h3>
+    <label class="field">
+      <span>Calidad</span>
+      <select id="quality">
+        <option value="fast">⚡ Rápida</option>
+        <option value="precise">🔍 Precisa (más lenta)</option>
+      </select>
+    </label>
+    <label class="field" id="zone-chip" hidden>
+      <span>Zona</span>
+      <select id="zone-mode"><option value="auto">Automática</option></select>
+    </label>
+    <label class="switch-row" id="only-chip" hidden>
+      <span>Decorar solo en mis zonas</span>
+      <input type="checkbox" id="only-zones"><i></i>
+    </label>
+    <h3>Fotos</h3>
+    <button id="folder" class="btn-soft wide">📁 Elegir carpeta donde guardar las fotos</button>
+    <details class="advanced">
+      <summary>Avanzado</summary>
+      <label class="switch-row"><span>Ver lo que detecta la IA</span><input type="checkbox" id="fx-debug"><i></i></label>
+      <p id="tech" class="tech"></p>
+    </details>
+  </div>
 </section>
-<section id="teach-view" hidden aria-label="Enseñar a la IA">
-  <p class="teach-help">Pinta encima de la foto con el color de cada cosa. No hace falta pintarlo todo: unos trazos en cada elemento bastan. Usa <b>Nada de esto</b> para lo que la IA confunde. Enseña varias fotos de cada zona desde distintos ángulos.</p>
+
+<!-- ===== Barra inferior ===== -->
+<footer id="actions" hidden>
+  <button id="gallery" class="act" title="Fotos guardadas"><span>🖼️</span><small>Fotos</small></button>
+  <button id="teach" class="act" title="Enseñar a la IA"><span>🎓</span><small>Enseñar</small></button>
+  <button id="photo" class="shutter" title="Hacer foto" aria-label="Hacer foto"><span class="cap"></span><span class="ball">📸</span></button>
+  <button id="pause" class="act" title="Pausar"><span>⏸️</span><small>Pausa</small></button>
+  <button id="flip" class="act" title="Cambiar de cámara"><span>🔄</span><small>Girar</small></button>
+</footer>
+
+<!-- ===== Galería ===== -->
+<section id="gallery-view" class="sheet full" hidden aria-label="Fotos guardadas">
+  <header class="sheet-head"><h2>🖼️ Tus fotos navideñas</h2><button id="gallery-close" class="icon-btn" aria-label="Cerrar">✕</button></header>
+  <div class="sheet-body">
+    <p id="gallery-empty" class="empty">Todavía no hay fotos.<br>Pulsa el botón rojo 📸 para hacer una.</p>
+    <div id="gallery-grid"></div>
+  </div>
+</section>
+
+<!-- ===== Enseñar a la IA ===== -->
+<section id="teach-view" class="sheet full" hidden aria-label="Enseñar a la IA">
+  <header class="sheet-head"><h2>🎓 Enseña a la IA</h2><button id="teach-cancel" class="icon-btn" aria-label="Cerrar">✕</button></header>
+  <p class="teach-help">Pinta encima de la foto con el color de cada cosa. Bastan unos trazos en cada elemento. Usa <b>Nada de esto</b> para lo que la IA confunde.</p>
   <div class="teach-row">
-    <label>Zona <select id="teach-zone"></select></label>
-    <button id="teach-zone-del">🗑️ Borrar zona</button>
+    <label class="field inline"><span>Zona</span><select id="teach-zone"></select></label>
+    <button id="teach-zone-del" class="btn-soft small">🗑️ Borrar zona</button>
   </div>
   <div id="teach-stage"><canvas id="teach-photo"></canvas><canvas id="teach-paint"></canvas></div>
   <div id="teach-palette"></div>
   <div class="teach-row">
-    <label>Pincel <input type="range" id="teach-size" min="8" max="90" value="36"></label>
-    <button id="teach-eraser">🧽 Goma</button>
-    <button id="teach-undo">↶ Deshacer</button>
+    <label class="brush">🖌️ <input type="range" id="teach-size" min="8" max="90" value="36" aria-label="Tamaño del pincel"></label>
+    <button id="teach-eraser" class="btn-soft small">🧽 Goma</button>
+    <button id="teach-undo" class="btn-soft small">↶ Deshacer</button>
+    <button id="teach-train" class="btn-magic small">✨ Entrenar</button>
   </div>
-  <div class="teach-row">
-    <button id="teach-cancel">Cancelar</button>
-    <button id="teach-train" class="primary">Entrenar</button>
-  </div>
-  <div class="teach-row cloud" id="cloud-row" hidden>
-    <span id="cloud-who">Entrenador</span>
-    <form id="cloud-login">
-      <input id="cloud-email" type="email" placeholder="correo de entrenador" autocomplete="username" required>
-      <input id="cloud-pass" type="password" placeholder="contraseña" autocomplete="current-password" required>
-      <button>☁️ Iniciar sesión</button>
-    </form>
-    <button id="cloud-publish" hidden>☁️ Publicar todas mis zonas</button>
-    <button id="cloud-logout" hidden>Cerrar sesión</button>
-  </div>
-  <div class="teach-row share">
-    <span>Compartir el entrenamiento:</span>
-    <button id="share-link">🔗 Enlace</button>
-    <button id="share-export">⬇️ Archivo</button>
-    <label class="btn">⬆️ Importar<input type="file" id="share-import" accept=".json,application/json" hidden></label>
-  </div>
+  <details class="advanced teach-more">
+    <summary>☁️ Compartir el entrenamiento</summary>
+    <div class="teach-row cloud" id="cloud-row" hidden>
+      <span id="cloud-who">Entrenador</span>
+      <form id="cloud-login">
+        <input id="cloud-email" type="email" placeholder="Correo de entrenador" autocomplete="username" required>
+        <input id="cloud-pass" type="password" placeholder="Contraseña" autocomplete="current-password" required>
+        <button class="btn-soft small">Iniciar sesión</button>
+      </form>
+      <button id="cloud-publish" class="btn-soft small" hidden>☁️ Publicar todas mis zonas</button>
+      <button id="cloud-logout" class="btn-soft small" hidden>Cerrar sesión</button>
+    </div>
+    <div class="teach-row share">
+      <button id="share-link" class="btn-soft small">🔗 Enviar enlace</button>
+      <button id="share-export" class="btn-soft small">⬇️ Guardar archivo</button>
+      <label class="btn-soft small">⬆️ Importar<input type="file" id="share-import" accept=".json,application/json" hidden></label>
+    </div>
+  </details>
 </section>
+
 <div id="toast" role="status" aria-live="polite" hidden></div>
 
 <script type="module" src="js/main.js"></script>

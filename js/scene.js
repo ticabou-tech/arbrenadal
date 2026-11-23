@@ -65,6 +65,7 @@ export class Scene {
   // ---------------------------------------------------------------------------
   ingest({ gw, gh, maps }, Gcap, gray) {
     this.gray = gray;
+    this.frameNo = (this.frameNo || 0) + 1;
     const a = CONFIG.blend;
     if (this.maps && this.gw === gw && this.gh === gh) {
       // Lleva el mapa acumulado al punto de vista del nuevo fotograma y lo fusiona.
@@ -341,8 +342,8 @@ export class Scene {
       seen.add(key);
       const snowy = this.maps.sky[Math.max(0, y - 2) * gw + x] > 0.3;
       const g = this.garland.get(key);
-      if (g) { g.y = g.y * 0.6 + wy * 0.4; g.x = key * this.gsp; g.miss = 0; g.snowy = snowy; }
-      else this.garland.set(key, { x: key * this.gsp, y: wy, snowy, miss: 0 });
+      if (g) { g.y = g.y * 0.6 + wy * 0.4; g.x = key * this.gsp; g.miss = 0; g.snowy = snowy; g.seen = this.frameNo; }
+      else this.garland.set(key, { x: key * this.gsp, y: wy, snowy, miss: 0, seen: this.frameNo });
     }
     for (const [key, g] of this.garland) {
       if (seen.has(key)) continue;

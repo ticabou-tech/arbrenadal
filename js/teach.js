@@ -361,6 +361,7 @@ export class Teacher {
     else if (data.type === "trained") {
       $("teach-train").disabled = false; $("teach-train").textContent = "Entrenar";
       const z = this.zones.find(o => o.id === data.zoneId); if (!z) return;
+      if (z.D !== data.D) z.descs = [];                 // huellas de otro modelo: no sirven
       Object.assign(z, { D: data.D, W: data.W, X: data.X, y: data.y, acc: data.acc, n: data.n, updated: new Date().toISOString() });
       z.descs = [...(z.descs || []), data.desc].slice(-MAX_DESCS);
       await this.save(); this.sync();
