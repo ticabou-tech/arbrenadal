@@ -37,7 +37,14 @@ La app **reconoce sola en qué zona estás** y usa su entrenamiento (selector **
 Automática**, o elige una a mano). Con **Solo en mis zonas** activado, fuera de tus zonas
 no decora nada.
 
-### Compartir el entrenamiento con otros móviles
+### Entrenamiento para todos (Firebase)
+
+Configurando Firebase (gratis, unos 10 minutos: ver **[FIREBASE.md](FIREBASE.md)**), lo
+que entrene un **entrenador** con sesión iniciada se guarda en la base de datos y
+**todos los que abran la web lo reciben automáticamente**. Solo pueden publicar las
+cuentas que tú autorices.
+
+### Compartir sin base de datos
 
 Desde el panel 🎓:
 
@@ -100,6 +107,8 @@ js/tracker.js       Seguimiento del movimiento de la cámara
 js/scene.js         Fusión de análisis y geometría: ventanas, árboles, borde de paredes
 js/decor.js         Dibujo de la decoración (ventanas, árboles, paredes)
 js/teach.js         Modo «Enseñar»: pintar, etiquetas y persistencia de lo aprendido
+js/cloud.js         Entrenamiento compartido en Firebase (Firestore + cuentas de entrenador)
+js/share.js         Empaquetado del entrenamiento (enlace, archivo, nube)
 js/store.js         Almacén persistente (IndexedDB)
 js/photos.js        Guardado de fotos (galería interna + carpeta con permiso, Guardar como, Fotos/Archivos en iPhone o descarga)
 js/snow.js          Nieve en 3 capas con oclusión y colisiones
@@ -107,6 +116,8 @@ js/sprites.js       Sprites pre-renderizados (bombillas, bolas, estrella, guirna
 js/geom.js          Utilidades geométricas
 js/config.js        Parámetros ajustables
 .github/workflows/pages.yml   Publicación automática en GitHub Pages
+firebase/firestore.rules      Reglas de seguridad de la base de datos
+FIREBASE.md                   Guía para activar el entrenamiento compartido
 ```
 
 ## Probarlo en local

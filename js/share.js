@@ -41,30 +41,37 @@ const unpackX = s => Float32Array.from(new Int8Array(unb64(s).buffer), v => v / 
 
 const pick = (a, n) => a.length <= n ? a : Array.from({ length: n }, (_, i) => a[Math.round(i * (a.length - 1) / (n - 1))]);
 
+// Una zona empaquetada: pesos (int8) y huellas (uint8). Sin muestras.
+export function packZone(z, K, maxDescs = 99) {
+  return {
+    id: z.id, name: z.name, model: z.model, D: z.D, updated: z.updated, acc: z.acc, n: z.n,
+    W: packW(z.W, K), descs: pick(z.descs || [], maxDescs).map(packDesc),
+  };
+}
+export function unpackZone(z, created) {
+  return {
+    id: String(z.id), name: String(z.name || "Zona"), model: String(z.model), D: z.D | 0,
+    updated: z.updated || created, acc: z.acc, n: z.n,
+    W: unpackW(z.W), descs: (z.descs || []).map(unpackDesc),
+    ...(z.X ? unpackSamples(z) : { X: null, y: null }),
+  };
+}
+// Muestras pintadas (para seguir entrenando en otro dispositivo).
+export const packSamples = z => ({ X: packX(z.X), y: b64(new Uint8Array(z.y.buffer, z.y.byteOffset, z.y.byteLength)) });
+export const unpackSamples = m => ({ X: unpackX(m.X), y: new Int8Array(unb64(m.y).buffer) });
+
 // zones: [{ id, name, model, D, W, X, y, descs, updated, acc, n }]
 export function buildPackage(zones, K, withSamples) {
   return {
     app: APP, v: VERSION, created: new Date().toISOString(),
-    zones: zones.filter(z => z.W).map(z => ({
-      id: z.id, name: z.name, model: z.model, D: z.D, updated: z.updated, acc: z.acc, n: z.n,
-      // En el enlace viajan como mucho 4 huellas por zona (repartidas) para que no sea muy largo.
-      W: packW(z.W, K), descs: pick(z.descs || [], withSamples ? 99 : 4).map(packDesc),
-      ...(withSamples && z.X && z.y ? { X: packX(z.X), y: b64(new Uint8Array(z.y.buffer, z.y.byteOffset, z.y.byteLength)) } : {}),
-    })),
+    // En el enlace viajan como mucho 4 huellas por zona (repartidas) para que no sea muy largo.
+    zones: zones.filter(z => z.W).map(z => ({ ...packZone(z, K, withSamples ? 99 : 4), ...(withSamples && z.X && z.y ? packSamples(z) : {}) })),
   };
 }
 
 export function readPackage(pkg) {
   if (pkg?.app !== APP || !Array.isArray(pkg.zones)) throw new Error("no es un archivo de entrenamiento de Navidad AR");
-  return {
-    created: pkg.created,
-    zones: pkg.zones.map(z => ({
-      id: String(z.id), name: String(z.name || "Zona"), model: String(z.model), D: z.D | 0,
-      updated: z.updated || pkg.created, acc: z.acc, n: z.n,
-      W: unpackW(z.W), descs: (z.descs || []).map(unpackDesc),
-      X: z.X ? unpackX(z.X) : null, y: z.y ? new Int8Array(unb64(z.y).buffer) : null,
-    })),
-  };
+  return { created: pkg.created, zones: pkg.zones.map(z => unpackZone(z, pkg.created)) };
 }
 
 export async function toLinkData(pkg) {

@@ -1,4 +1,13 @@
 // Configuración general de Navidad AR.
+// Entrenamiento compartido para todos (Firebase). Pega aquí la "apiKey" y el "projectId"
+// de tu proyecto (Configuración del proyecto → General → Tus apps → app web). La apiKey
+// de Firebase es pública por diseño: lo que se puede hacer con ella lo limitan las reglas
+// de firebase/firestore.rules. Si se dejan vacíos, cada móvil guarda solo lo suyo.
+export const FIREBASE = {
+  apiKey: "",
+  projectId: "",
+};
+
 export const TRANSFORMERS_URL = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 
 export const MODELS = {

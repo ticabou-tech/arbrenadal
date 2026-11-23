@@ -96,3 +96,8 @@ button:disabled { opacity: .5; cursor: default; }
 .teach-row.share span { font-size: 13px; opacity: .8; }
 .teach-row .btn { font-size: 14px; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,.15); cursor: pointer; }
 .chip select option { color: #000; }
+
+.teach-row.cloud { font-size: 13px; }
+.teach-row.cloud form { display: flex; flex-wrap: wrap; gap: 6px; }
+.teach-row.cloud input { font: inherit; font-size: 14px; padding: 7px 8px; border-radius: 6px; border: 0; background: rgba(255,255,255,.12); color: #fff; min-width: 0; flex: 1 1 140px; }
+.teach-row.cloud form[hidden] { display: none; }

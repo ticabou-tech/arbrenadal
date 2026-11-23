@@ -66,6 +66,16 @@
     <button id="teach-cancel">Cancelar</button>
     <button id="teach-train" class="primary">Entrenar</button>
   </div>
+  <div class="teach-row cloud" id="cloud-row" hidden>
+    <span id="cloud-who">Entrenador</span>
+    <form id="cloud-login">
+      <input id="cloud-email" type="email" placeholder="correo de entrenador" autocomplete="username" required>
+      <input id="cloud-pass" type="password" placeholder="contraseña" autocomplete="current-password" required>
+      <button>☁️ Iniciar sesión</button>
+    </form>
+    <button id="cloud-publish" hidden>☁️ Publicar todas mis zonas</button>
+    <button id="cloud-logout" hidden>Cerrar sesión</button>
+  </div>
   <div class="teach-row share">
     <span>Compartir el entrenamiento:</span>
     <button id="share-link">🔗 Enlace</button>

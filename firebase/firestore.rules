@@ -1,0 +1,29 @@
+// Reglas de seguridad de Firestore para el entrenamiento compartido de Navidad AR.
+// Pégalas en Firebase → Firestore Database → Reglas → Publicar.
+//
+//  · Cualquiera (también sin cuenta) puede LEER las zonas: así todos reciben el entrenamiento.
+//  · Solo pueden escribir los entrenadores: usuarios con sesión iniciada cuyo correo tenga
+//    un documento en la colección "entrenadores" (el ID del documento es el correo).
+//    Así, aunque alguien se creara una cuenta, no podría cambiar nada.
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function esEntrenador() {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/entrenadores/$(request.auth.token.email));
+    }
+    match /zonas/{id} {
+      allow read: if true;
+      allow write: if esEntrenador();
+    }
+    match /zonas_muestras/{id}/{resto=**} {
+      allow read, write: if esEntrenador();
+    }
+    match /zonas_muestras/{id} {
+      allow read, write: if esEntrenador();
+    }
+    match /entrenadores/{correo} {
+      allow read, write: if false;   // solo se gestiona desde la consola de Firebase
+    }
+  }
+}
