@@ -33,7 +33,7 @@ async function load({ model: id, device, dtype: dt }) {
   buildGroups();
   await infer({ id: -1, width: 128, height: 96, buffer: new Uint8ClampedArray(128 * 96 * 4).buffer }, true);
   backend = device === "webgpu" ? "WebGPU" : "WASM"; dtype = dt;
-  self.postMessage({ type: "ready", backend, dtype, model: id });
+  self.postMessage({ type: "ready", backend, dtype, model: id, D });
 }
 
 function buildGroups() {
@@ -45,15 +45,17 @@ function buildGroups() {
 }
 
 // ---------------------------------------------------------------------------
-// Aprendizaje del usuario ("Enseñar")
+// Aprendizaje del usuario por ZONAS ("Enseñar")
 // Para cada celda de la rejilla del modelo, las características son las 150
-// log-probabilidades del modelo más el color; un clasificador lineal (regresión
-// logística multiclase) aprende a traducirlas a las clases que pinta el usuario.
+// log-probabilidades del modelo más el color; por cada zona, un clasificador lineal
+// (regresión logística multiclase) aprende a traducirlas a las clases que pinta el
+// usuario. Cada zona guarda además "huellas" de sus fotos (qué clases hay en cada parte
+// de la imagen y sus colores) para reconocer automáticamente en qué zona estamos.
 // ---------------------------------------------------------------------------
-const K = TEACH_CLASSES.length, MAX_SAMPLES = 8000;
+const K = TEACH_CLASSES.length, MAX_SAMPLES = 8000, TAU0 = 0.09;
 let D = 0;                         // dimensión de las características (C + 3 colores + sesgo)
-let adapter = null, useAdapter = true, teachFrame = null;
-let samples = { X: new Float32Array(0), y: new Int8Array(0), n: 0 };
+let teachFrame = null, zones = [], zoneMode = "auto", onlyZones = false;
+const zoneDist = new Map();        // distancia suavizada de la vista actual a cada zona
 
 function feature(logp, C, N, i, x, N0, w, gx, gy, out, o) {
   for (let c = 0; c < C; c++) out[o + c] = Math.max(-12, logp[c * N + i]) / 4;
@@ -62,9 +64,37 @@ function feature(logp, C, N, i, x, N0, w, gx, gy, out, o) {
   out[o + C + 3] = 1;
 }
 
-function train() {
-  const { X, y, n } = samples;
-  if (!n) { adapter = null; return { n: 0 }; }
+// Huella de la imagen: 3×3 zonas × (raíz de la probabilidad media de cada clase + color medio).
+function descriptor(logp, C, N, gw, gh, x, N0, w, flip) {
+  const L = C + 3, out = new Float32Array(9 * L), cnt = new Float32Array(9);
+  for (let gy = 0; gy < gh; gy += 2) for (let gx = 0; gx < gw; gx += 2) {
+    let cx = Math.min(2, (gx * 3 / gw) | 0); if (flip) cx = 2 - cx;
+    const cell = Math.min(2, (gy * 3 / gh) | 0) * 3 + cx, o = cell * L, i = gy * gw + gx;
+    for (let c = 0; c < C; c++) out[o + c] += Math.exp(logp[c * N + i]);
+    const sidx = (gy * 4 + 2) * w + gx * 4 + 2;
+    for (let k = 0; k < 3; k++) out[o + C + k] += Math.min(1, Math.max(0, x[k * N0 + sidx] * STD[k] + MEAN[k]));
+    cnt[cell]++;
+  }
+  for (let cell = 0; cell < 9; cell++) {
+    const o = cell * L, n = cnt[cell] || 1;
+    for (let c = 0; c < C; c++) out[o + c] = Math.sqrt(out[o + c] / n);
+    for (let k = 0; k < 3; k++) out[o + C + k] /= n;
+  }
+  return out;
+}
+
+const dist = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s / a.length); };
+
+// Umbral de reconocimiento de una zona: según lo distintas que son sus propias fotos.
+function zoneTau(descs) {
+  if (descs.length < 2) return TAU0;
+  let s = 0, n = 0;
+  for (let i = 0; i < descs.length; i++) for (let j = i + 1; j < descs.length; j++) { s += dist(descs[i], descs[j]); n++; }
+  return Math.max(TAU0, 1.8 * s / n);
+}
+
+function train(X, y, n) {
+  if (!n) return null;
   // Pesos por clase (las clases con pocos trazos cuentan más).
   const cnt = new Array(K).fill(0); for (let i = 0; i < n; i++) cnt[y[i]]++;
   const present = cnt.filter(c => c).length, cw = cnt.map(c => c ? n / (present * c) : 0);
@@ -90,47 +120,59 @@ function train() {
     }
     if (ep % 40 === 0) self.postMessage({ type: "trainprogress", progress: ep / 160 });
   }
-  // Acierto sobre las muestras (orientativo).
   let ok = 0;
   for (let i = 0; i < n; i++) {
     let best = 0, bv = -Infinity;
     for (let k = 0; k < K; k++) { let s = 0; for (let d = 0; d < D; d++) s += Wt[k * D + d] * X[i * D + d]; if (s > bv) { bv = s; best = k; } }
     if (best === y[i]) ok++;
   }
-  adapter = Wt;
-  return { n, acc: ok / n, counts: cnt };
+  return { W: Wt, acc: ok / n };
 }
 
-function addSamples(labels) {
+// Añade a las muestras de una zona las celdas pintadas de la foto congelada.
+function addSamples(X, y, labels) {
   const f = teachFrame; if (!f) throw new Error("no hay foto para enseñar");
   const idx = []; for (let i = 0; i < labels.length; i++) if (labels[i] >= 0) idx.push(i);
-  let { X, y, n } = samples;
-  const nn = n + idx.length, X2 = new Float32Array(nn * D), y2 = new Int8Array(nn);
-  X2.set(X.subarray(0, n * D)); y2.set(y.subarray(0, n));
+  const n = y.length, nn = n + idx.length, X2 = new Float32Array(nn * D), y2 = new Int8Array(nn);
+  X2.set(X.subarray(0, n * D)); y2.set(y);
   idx.forEach((i, j) => { X2.set(f.F.subarray(i * D, (i + 1) * D), (n + j) * D); y2[n + j] = labels[i]; });
-  samples = { X: X2, y: y2, n: nn };
-  if (nn > MAX_SAMPLES) {                       // submuestreo aleatorio
-    const keep = new Uint32Array(nn).map((_, i) => i);
-    for (let i = nn - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [keep[i], keep[j]] = [keep[j], keep[i]]; }
-    const X3 = new Float32Array(MAX_SAMPLES * D), y3 = new Int8Array(MAX_SAMPLES);
-    for (let j = 0; j < MAX_SAMPLES; j++) { X3.set(X2.subarray(keep[j] * D, (keep[j] + 1) * D), j * D); y3[j] = y2[keep[j]]; }
-    samples = { X: X3, y: y3, n: MAX_SAMPLES };
-  }
-  return idx.length;
+  if (nn <= MAX_SAMPLES) return { X: X2, y: y2, added: idx.length };
+  const keep = new Uint32Array(nn).map((_, i) => i);                 // submuestreo aleatorio
+  for (let i = nn - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [keep[i], keep[j]] = [keep[j], keep[i]]; }
+  const X3 = new Float32Array(MAX_SAMPLES * D), y3 = new Int8Array(MAX_SAMPLES);
+  for (let j = 0; j < MAX_SAMPLES; j++) { X3.set(X2.subarray(keep[j] * D, (keep[j] + 1) * D), j * D); y3[j] = y2[keep[j]]; }
+  return { X: X3, y: y3, added: idx.length };
 }
 
 async function handleTeach(data) {
-  if (data.type === "train") {
-    const added = addSamples(data.labels);
-    const r = train();
-    self.postMessage({ type: "trained", added, ...r, D, X: samples.X.slice(0, samples.n * D), y: samples.y.slice(0, samples.n) });
-  } else if (data.type === "adapter") {             // restaurar lo aprendido guardado
-    if (data.D !== D) { self.postMessage({ type: "adapterloaded", ok: false }); return; }
-    samples = { X: data.X, y: data.y, n: data.y.length };
-    const r = train();
-    self.postMessage({ type: "adapterloaded", ok: true, ...r });
-  } else if (data.type === "forget") { samples = { X: new Float32Array(0), y: new Int8Array(0), n: 0 }; adapter = null; }
-  else if (data.type === "useAdapter") useAdapter = data.on;
+  if (data.type === "train") {                       // { zoneId, labels, X, y }
+    const X0 = data.X?.length === data.y.length * D ? data.X : new Float32Array(0), y0 = X0.length ? data.y : new Int8Array(0);
+    const { X, y, added } = addSamples(X0, y0, data.labels);
+    const r = train(X, y, y.length);
+    self.postMessage({ type: "trained", zoneId: data.zoneId, added, n: y.length, acc: r.acc, D, W: r.W, X, y, desc: teachFrame.desc });
+  } else if (data.type === "retrain") {             // reentrenar con muestras guardadas (migración)
+    const r = data.D === D ? train(data.X, data.y, data.y.length) : null;
+    self.postMessage({ type: "retrained", zoneId: data.zoneId, ok: !!r, W: r?.W, acc: r?.acc, D });
+  } else if (data.type === "zones") {               // [{ id, D, W, descs }]
+    zones = data.zones.filter(z => z.D === D && z.W?.length === K * D).map(z => ({ ...z, tau: zoneTau(z.descs || []) }));
+    zoneDist.clear();
+  } else if (data.type === "zoneMode") { zoneMode = data.mode; onlyZones = data.only; }
+}
+
+// Elige la zona activa para la vista actual. Devuelve { zone, d, tau } o null.
+function pickZone(desc) {
+  if (zoneMode === "none" || !zones.length) return null;
+  const cand = zoneMode === "auto" ? zones : zones.filter(z => z.id === zoneMode);
+  let best = null;
+  for (const z of cand) {
+    const d = z.descs?.length ? Math.min(...z.descs.map(e => dist(e, desc))) : 0;
+    const e = zoneDist.has(z.id) ? zoneDist.get(z.id) * 0.6 + d * 0.4 : d;
+    zoneDist.set(z.id, e);
+    if (!best || e < best.d) best = { zone: z, d: e, tau: z.tau };
+  }
+  if (!best) return null;
+  best.match = zoneMode !== "auto" || !best.zone.descs?.length || best.d < best.tau;
+  return best;
 }
 
 async function infer({ id, epoch, width: w, height: h, buffer, flip, teach }, warmup = false) {
@@ -167,33 +209,40 @@ async function infer({ id, epoch, width: w, height: h, buffer, flip, teach }, wa
     maps[n] = m;
   }
 
-  // Foto para enseñar: se guardan las características de cada celda.
+  const desc = descriptor(logp, C, N, gw, gh, x, N0, w, flip);
+
+  // Foto para enseñar: se guardan las características de cada celda y su huella.
   if (teach) {
     const F = new Float32Array(N * D);
     for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) { const i = gy * gw + gx; feature(logp, C, N, i, x, N0, w, gx, gy, F, i * D); }
-    teachFrame = { F, gw, gh };
+    teachFrame = { F, gw, gh, desc };
   }
 
-  // Lo aprendido se combina con el modelo.
-  if (adapter && useAdapter) {
-    const f = new Float32Array(D), z = new Float32Array(K), A = TEACH_CLASSES.map(() => new Float32Array(N));
+  // Zona: si la vista corresponde a una zona entrenada, su clasificador se combina con
+  // el modelo. Con "solo en mis zonas", fuera de ellas no se decora nada.
+  const pz = pickZone(desc), zone = pz?.match ? pz.zone : null;
+  if (zone) {
+    const Wz = zone.W, f = new Float32Array(D), z = new Float32Array(K), A = TEACH_CLASSES.map(() => new Float32Array(N));
     for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
       const i = gy * gw + gx;
       feature(logp, C, N, i, x, N0, w, gx, gy, f, 0);
       let zm = -Infinity;
-      for (let k = 0; k < K; k++) { let s = 0; const o = k * D; for (let d = 0; d < D; d++) s += adapter[o + d] * f[d]; z[k] = s; if (s > zm) zm = s; }
+      for (let k = 0; k < K; k++) { let s = 0; const o = k * D; for (let d = 0; d < D; d++) s += Wz[o + d] * f[d]; z[k] = s; if (s > zm) zm = s; }
       let sum = 0; for (let k = 0; k < K; k++) { z[k] = Math.exp(z[k] - zm); sum += z[k]; }
       for (let k = 0; k < K; k++) A[k][i] = z[k] / sum;
     }
     for (let k = 0; k < K - 1; k++) {
       const m = maps[TEACH_CLASSES[k]], a = A[k];
-      if (m) for (let i = 0; i < N; i++) m[i] = 0.25 * m[i] + 0.75 * a[i];
+      if (m) for (let i = 0; i < N; i++) m[i] = 0.2 * m[i] + 0.8 * a[i];
     }
+  } else if (onlyZones && zones.length) {
+    for (const n of ["window", "wall", "onwall", "tree"]) maps[n]?.fill(0);
   }
+  const zoneInfo = pz ? { id: pz.zone.id, match: pz.match, d: pz.d, tau: pz.tau } : null;
 
   if (flip) for (const n of names) {               // deshace el espejo
     const m = maps[n];
     for (let y = 0; y < gh; y++) { const r = y * gw; for (let i = 0; i < gw >> 1; i++) { const a = m[r + i]; m[r + i] = m[r + gw - 1 - i]; m[r + gw - 1 - i] = a; } }
   }
-  self.postMessage({ type: "result", id, epoch, gw, gh, maps, teach: !!teach, ms: performance.now() - t0 }, names.map(n => maps[n].buffer));
+  self.postMessage({ type: "result", id, epoch, gw, gh, maps, zone: zoneInfo, teach: !!teach, ms: performance.now() - t0 }, names.map(n => maps[n].buffer));
 }

@@ -23,7 +23,8 @@
     <label class="chip"><input type="checkbox" id="fx-warm"> Luces cálidas</label>
     <label class="chip"><input type="checkbox" id="fx-night"> Noche</label>
     <label class="chip"><input type="checkbox" id="fx-debug"> Ver máscaras</label>
-    <label class="chip learned" id="learned-chip" hidden><input type="checkbox" id="fx-learned" checked> Lo aprendido</label>
+    <label class="chip learned" id="zone-chip" hidden>Zona <select id="zone-mode"><option value="auto">Automática</option></select></label>
+    <label class="chip learned" id="only-chip" hidden><input type="checkbox" id="only-zones"> Solo en mis zonas</label>
     <label class="chip">Detección
       <select id="quality">
         <option value="fast">Rápida</option>
@@ -49,7 +50,11 @@
   <div id="gallery-grid"></div>
 </section>
 <section id="teach-view" hidden aria-label="Enseñar a la IA">
-  <p class="teach-help">Pinta encima de la foto con el color de cada cosa. No hace falta pintarlo todo: unos trazos en cada elemento bastan. Usa <b>Nada de esto</b> para lo que la IA confunde.</p>
+  <p class="teach-help">Pinta encima de la foto con el color de cada cosa. No hace falta pintarlo todo: unos trazos en cada elemento bastan. Usa <b>Nada de esto</b> para lo que la IA confunde. Enseña varias fotos de cada zona desde distintos ángulos.</p>
+  <div class="teach-row">
+    <label>Zona <select id="teach-zone"></select></label>
+    <button id="teach-zone-del">🗑️ Borrar zona</button>
+  </div>
   <div id="teach-stage"><canvas id="teach-photo"></canvas><canvas id="teach-paint"></canvas></div>
   <div id="teach-palette"></div>
   <div class="teach-row">
@@ -59,8 +64,13 @@
   </div>
   <div class="teach-row">
     <button id="teach-cancel">Cancelar</button>
-    <button id="teach-forget">Olvidar lo aprendido</button>
     <button id="teach-train" class="primary">Entrenar</button>
+  </div>
+  <div class="teach-row share">
+    <span>Compartir el entrenamiento:</span>
+    <button id="share-link">🔗 Enlace</button>
+    <button id="share-export">⬇️ Archivo</button>
+    <label class="btn">⬆️ Importar<input type="file" id="share-import" accept=".json,application/json" hidden></label>
   </div>
 </section>
 <div id="toast" role="status" aria-live="polite" hidden></div>
