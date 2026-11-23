@@ -13,7 +13,8 @@ import { savePhoto, chooseFolder, folderSupported, folderName, listPhotos, delet
 const $ = id => document.getElementById(id);
 const video = $("video"), out = $("out"), ctx = out.getContext("2d");
 const opt = id => $(id).checked;
-const setStatus = txt => { $("status").textContent = txt; };
+// El estado se muestra en la pantalla de bienvenida mientras carga y luego en la barra superior.
+const setStatus = txt => { $("status").textContent = txt; if (!$("welcome").hidden) $("load-msg").textContent = txt; };
 
 const tracker = new Tracker(CONFIG.trackWidth);
 const scene = new Scene();
@@ -59,7 +60,11 @@ function resize() {
 function onVideoFrame() {
   if (running && !paused && W) {
     if (video.videoWidth !== W || video.videoHeight !== H) resize();
+    const lost0 = tracker.lostCount || 0;
     const M = tracker.update(video, W, H);
+    // Seguimiento perdido (movimiento brusco, desenfoque): las posiciones ya no son
+    // fiables, así que se ocultan los adornos hasta que el siguiente análisis los confirme.
+    if ((tracker.lostCount || 0) !== lost0) scene.markLost();
     G = compose(M, G);
     snow.onMotion(M);
     const now = performance.now(), fdt = Math.max(0.01, (now - (onVideoFrame.t || now - 33)) / 1000); onVideoFrame.t = now;
@@ -313,15 +318,20 @@ let lastStatus = 0;
 function updateStatus(t) {
   if (t - lastStatus < 500) return;
   lastStatus = t;
-  if (!scene.ready) { setStatus(`${backend} · analizando…`); return; }
-  const c = scene.coverage, found = [];
-  if (scene.windows.some(w => !w.miss)) found.push("ventana"); else if (c.window > 0.01) found.push("ventana (?)");
-  if (scene.trees.some(tr => !tr.miss)) found.push("árbol");
-  if (scene.garland.size) found.push("pared");
+  if (!scene.ready) { setStatus("✨ Mirando a tu alrededor…"); return; }
+  const found = [];
+  if (scene.trees.some(tr => tr.seen >= 2 && scene.fresh(tr.last))) found.push("🎄 Árbol");
+  if (scene.windows.some(w => w.seen >= 2 && scene.fresh(w.last))) found.push("🪟 Ventana");
+  if ([...scene.garland.values()].some(g => g.hits >= 2 && scene.fresh(g.seen))) found.push("🌿 Pared");
+  const zone = teacher.statusText();
+  const zoneTxt = zone.startsWith("zona: ") ? "📍 " + zone.slice(6) : zone.includes("no se decora") ? "📍 Fuera de tus zonas" : "";
+  let msg = found.length ? found.join(" · ") : "👀 Apunta a una ventana, un árbol o una pared";
+  if (tracker.quality < 0.15 && found.length) msg += " · mueve despacio";
+  setStatus((zoneTxt ? zoneTxt + " · " : "") + msg);
+  // Datos técnicos, en Ajustes → Avanzado.
   const where = scene.indoor > 0.5 ? "interior" : "exterior";
   const track = tracker.quality > 0.25 ? "seguimiento OK" : "poca textura para seguir";
-  const zone = teacher.statusText();
-  setStatus(`${backend} ${dtype} (${modelName}, ${SIZES[sizeIdx]} px) · ${Math.round(inferMs)} ms · ${where} · ${track}${zone ? " · " + zone : ""} · ${found.length ? found.join(", ") : "apunta a una ventana, un árbol o una pared"}`);
+  $("tech").textContent = `${backend} ${dtype} · modelo ${modelName} · entrada ${SIZES[sizeIdx]} px · ${Math.round(inferMs)} ms por análisis · ${where} · ${track}${zone ? " · " + zone : ""}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +346,8 @@ $("start").onclick = async () => {
     await openCamera();
     setStatus("Cargando modelo…");
     await startWorker($("quality").value);
-    btn.hidden = true;
+    $("welcome").hidden = true;
+    $("ui").hidden = false;
     $("actions").hidden = false;
     running = true;
     if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(onVideoFrame);
@@ -345,10 +356,15 @@ $("start").onclick = async () => {
     console.error(e);
     const msg = e.name === "NotAllowedError" ? "Permiso de cámara denegado." :
                 e.name === "NotFoundError" ? "No se ha encontrado ninguna cámara." : e.message;
-    setStatus("Error: " + msg);
+    setStatus("😕 " + msg);
     btn.disabled = false;
   }
 };
+
+// Panel de ajustes.
+$("settings-btn").onclick = () => { $("settings").hidden = !$("settings").hidden; };
+$("settings-close").onclick = () => { $("settings").hidden = true; };
+out.addEventListener("click", () => { $("settings").hidden = true; });
 
 $("quality").onchange = async () => {
   if (!running) return;
@@ -364,7 +380,8 @@ $("flip").onclick = async () => {
 $("pause").onclick = () => {
   paused = !paused;
   if (paused) video.pause(); else { video.play(); tracker.reset(); }
-  $("pause").textContent = paused ? "▶️" : "⏸️";
+  $("pause").querySelector("span").textContent = paused ? "▶️" : "⏸️";
+  $("pause").querySelector("small").textContent = paused ? "Seguir" : "Pausa";
 };
 
 // La imagen se codifica de forma síncrona para que el guardado empiece dentro del

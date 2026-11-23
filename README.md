@@ -34,8 +34,16 @@ patio, fachada, salón…):
    acumulan y la zona se reconoce mejor.
 
 La app **reconoce sola en qué zona estás** y usa su entrenamiento (selector **Zona:
-Automática**, o elige una a mano). Con **Solo en mis zonas** activado, fuera de tus zonas
-no decora nada.
+Automática**, o elige una a mano). Para entrar en una zona tiene que reconocerla dos
+análisis seguidos, y para salir no reconocerla en tres, así un fotograma movido no la cambia.
+
+- Con **Decorar solo en mis zonas** (activado por defecto cuando hay zonas), fuera de
+  ellas no se decora nada.
+- **Dentro de una zona solo se decora lo que se pintó en ella**: pinta todo lo que
+  quieras decorar. Lo pintado como **Nada de esto** apaga cualquier adorno en ese sitio.
+- Al mover la cámara solo se dibuja lo confirmado en los últimos análisis, y si el
+  seguimiento se pierde (movimiento brusco, imagen borrosa) se oculta todo hasta
+  volver a confirmarlo: no quedan adornos donde no hay nada.
 
 ### Entrenamiento para todos (Firebase)
 

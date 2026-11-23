@@ -34,7 +34,7 @@ export class Tracker {
     const old = this.Mkc;
     const m = estimate(this.key, cur, old);
     if (!m) {                                    // perdido: se empieza de nuevo desde aquí
-      this.setKey(cur); this.quality = 0;
+      this.setKey(cur); this.quality = 0; this.lostCount = (this.lostCount || 0) + 1;
       return I();
     }
     this.quality = m.quality;
