@@ -21,23 +21,49 @@ navegadores.
 Además permite **cambiar de cámara**, **pausar**, **modo noche**,
 **luces cálidas**, elegir **detección rápida o precisa** y ver las **máscaras** detectadas.
 
-## Enseñar a la IA (🎓)
+## Enseñar a la IA por zonas (🎓)
 
-Si la IA confunde cosas de tu sitio (una pared de cristal tomada por ventana, un seto
-tomado por árbol…), puedes enseñarle:
+Puedes entrenar la app para que funcione perfecta en **tus sitios** (2, 3 o más zonas:
+patio, fachada, salón…):
 
-1. Apunta a la zona y pulsa **🎓**: se congela la imagen.
-2. Pinta encima con el dedo: **Ventana**, **Pared**, **Árbol**, **Techo**, **Cielo** o
-   **Nada de esto** (para lo que confunde). Bastan unos trazos en cada elemento.
-3. Pulsa **Entrenar**. En unos segundos aprende y empieza a usarlo.
+1. Ve a la zona y pulsa **🎓**: se congela la imagen.
+2. Elige la zona (o **➕ Nueva zona…** y ponle nombre).
+3. Pinta encima con el dedo: **Ventana**, **Pared**, **Árbol**, **Techo**, **Cielo** o
+   **Nada de esto** (para lo que la IA confunde). Bastan unos trazos en cada elemento.
+4. Pulsa **Entrenar**. Enseña varias fotos de cada zona desde distintos ángulos: se
+   acumulan y la zona se reconoce mejor.
 
-Puedes enseñarle varias fotos (se acumulan) y desactivarlo con **Lo aprendido** u
-olvidarlo desde el mismo panel. Todo se queda en tu dispositivo.
+La app **reconoce sola en qué zona estás** y usa su entrenamiento (selector **Zona:
+Automática**, o elige una a mano). Con **Solo en mis zonas** activado, fuera de tus zonas
+no decora nada.
+
+### Entrenamiento para todos (Firebase)
+
+Configurando Firebase (gratis, unos 10 minutos: ver **[FIREBASE.md](FIREBASE.md)**), lo
+que entrene un **entrenador** con sesión iniciada se guarda en la base de datos y
+**todos los que abran la web lo reciben automáticamente**. Solo pueden publicar las
+cuentas que tú autorices.
+
+### Compartir sin base de datos
+
+Desde el panel 🎓:
+
+- **🔗 Enlace**: genera un enlace con el entrenamiento dentro (comprimido, sin
+  servidor). Quien lo abre en su móvil lo recibe y se le queda guardado.
+- **⬇️ Archivo**: descarga `entrenamiento.json` con todo (incluidas las muestras
+  pintadas, para poder seguir entrenando en otro dispositivo). **⬆️ Importar** lo carga.
+- **Para todo el mundo**: sube ese `entrenamiento.json` a la raíz del repositorio
+  (GitHub → *Add file* → *Upload files*). La web lo publica y **cualquiera que la abra
+  recibe tu entrenamiento automáticamente**. Si lo vuelves a subir actualizado, todos
+  reciben la nueva versión.
+
+El entrenamiento va ligado al modelo con el que se hizo (detección rápida o precisa).
 
 Por dentro: para cada zona de la imagen se guardan las 150 puntuaciones del modelo (una
-por tipo de objeto de ADE20K) y su color, y se entrena un clasificador lineal (regresión
-logística multiclase) que traduce esas puntuaciones a tus clases; su resultado se
-combina con el del modelo. Se guarda por modelo (rápido / preciso) en IndexedDB.
+por tipo de objeto de ADE20K) y su color, y por cada zona se entrena un clasificador
+lineal (regresión logística multiclase) cuyo resultado se combina con el del modelo. Cada
+zona guarda además "huellas" de sus fotos (qué clases hay en cada parte de la imagen y sus
+colores) para reconocerla. Todo se guarda en el dispositivo (IndexedDB).
 
 ## Cómo funciona
 
@@ -81,6 +107,8 @@ js/tracker.js       Seguimiento del movimiento de la cámara
 js/scene.js         Fusión de análisis y geometría: ventanas, árboles, borde de paredes
 js/decor.js         Dibujo de la decoración (ventanas, árboles, paredes)
 js/teach.js         Modo «Enseñar»: pintar, etiquetas y persistencia de lo aprendido
+js/cloud.js         Entrenamiento compartido en Firebase (Firestore + cuentas de entrenador)
+js/share.js         Empaquetado del entrenamiento (enlace, archivo, nube)
 js/store.js         Almacén persistente (IndexedDB)
 js/photos.js        Guardado de fotos (galería interna + carpeta con permiso, Guardar como, Fotos/Archivos en iPhone o descarga)
 js/snow.js          Nieve en 3 capas con oclusión y colisiones
@@ -88,6 +116,8 @@ js/sprites.js       Sprites pre-renderizados (bombillas, bolas, estrella, guirna
 js/geom.js          Utilidades geométricas
 js/config.js        Parámetros ajustables
 .github/workflows/pages.yml   Publicación automática en GitHub Pages
+firebase/firestore.rules      Reglas de seguridad de la base de datos
+FIREBASE.md                   Guía para activar el entrenamiento compartido
 ```
 
 ## Probarlo en local

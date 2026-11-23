@@ -123,11 +123,12 @@ function loadWorker(cfg, quality) {
         modelName = data.model.includes("b2") ? "preciso" : "rápido";
         sizeIdx = SIZES.indexOf(START_SIZE[data.model.includes("b2") ? "precise" : "fast"]);
         if (quality === "precise" && !data.model.includes("b2")) setTimeout(() => toast("El modelo preciso no está disponible en este dispositivo: se usa el rápido"), 500);
-        progress.hidden = true; currentModel = data.model; teacher.restore(currentModel); resolve();
-      } else if (["trainprogress", "trained", "adapterloaded"].includes(data.type)) {
-        teacher.onMessage(data, currentModel);
+        progress.hidden = true; currentModel = data.model; teacher.restore(currentModel, data.D); resolve();
+      } else if (["trainprogress", "trained", "retrained"].includes(data.type)) {
+        teacher.onMessage(data);
       } else if (data.type === "result") {
         busy = false;
+        teacher.onZone(data.zone);
         if (data.teach && teachWait) { teachWait.res({ image: teachWait.image, gw: data.gw, gh: data.gh }); teachWait = null; }
         if (data.epoch !== epoch) return;
         inferMs = inferMs ? inferMs * 0.8 + data.ms * 0.2 : data.ms;
@@ -319,7 +320,8 @@ function updateStatus(t) {
   if (scene.garland.size) found.push("pared");
   const where = scene.indoor > 0.5 ? "interior" : "exterior";
   const track = tracker.quality > 0.25 ? "seguimiento OK" : "poca textura para seguir";
-  setStatus(`${backend} ${dtype} (${modelName}, ${SIZES[sizeIdx]} px) · ${Math.round(inferMs)} ms · ${where} · ${track} · ${found.length ? found.join(", ") : "apunta a una ventana, un árbol o una pared"}`);
+  const zone = teacher.statusText();
+  setStatus(`${backend} ${dtype} (${modelName}, ${SIZES[sizeIdx]} px) · ${Math.round(inferMs)} ms · ${where} · ${track}${zone ? " · " + zone : ""} · ${found.length ? found.join(", ") : "apunta a una ventana, un árbol o una pared"}`);
 }
 
 // ---------------------------------------------------------------------------

@@ -23,7 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Preparar sitio
-        run: mkdir _site && cp -r index.html style.css js _site/
+        run: |
+          mkdir _site && cp -r index.html style.css js _site/
+          if [ -f entrenamiento.json ]; then cp entrenamiento.json _site/; fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
